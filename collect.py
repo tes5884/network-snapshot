@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.1.0"
+COLLECTOR_VERSION = "0.2.0"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
