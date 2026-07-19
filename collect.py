@@ -439,6 +439,7 @@ def collect(args) -> dict:
             "mode": mode,
             "collector_version": COLLECTOR_VERSION,
             "site_label": args.site,
+            "location": args.location,
             "operator": args.operator,
             "interface": iface_info,
             "coverage_note": coverage,
@@ -467,6 +468,7 @@ def demo_snapshot() -> dict:
             "mode": "active",
             "collector_version": COLLECTOR_VERSION,
             "site_label": "Acme Dental (DEMO)",
+            "location": "reception jack",
             "operator": "tzvi",
             "interface": {"name": "eth0", "mac": "dc:a6:32:aa:bb:cc", "ipv4": "10.0.0.50", "cidr": "10.0.0.0/24", "gateway": "10.0.0.1"},
             "coverage_note": "single broadcast domain (10.0.0.0/24) from this port; no VLAN tags seen (looks flat / unmanaged switch)",
@@ -510,7 +512,8 @@ def demo_snapshot() -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Network Snapshot collector")
     ap.add_argument("-o", "--output", help="write snapshot JSON here (default: stdout)")
-    ap.add_argument("--site", default=None, help="prospect / site label")
+    ap.add_argument("--site", default=None, help="prospect / site label (the merge key)")
+    ap.add_argument("--location", default=None, help="where this drop is (e.g. 'server room / camera VLAN') — context for a multi-drop report, not a merge directive")
     ap.add_argument("--operator", default=None, help="who ran the scan")
     ap.add_argument("--passive", action="store_true", help="listen only — no arp-scan/nmap probing")
     ap.add_argument("--iface", default=None, help="force interface (else auto-detect)")

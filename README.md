@@ -23,11 +23,27 @@ sudo apt install nmap arp-scan tcpdump avahi-utils network-manager lldpd
 `lldpd` is optional but makes VLAN/switch discovery much better (it keeps an
 LLDP neighbor table instead of us sniffing a few frames).
 
-### Run
+### Run — the easy way (TUI)
+
+Don't want to remember flags? Launch the terminal UI, fill in the fields, hit
+Run:
+
+```bash
+sudo python3 run.py
+```
+
+Arrow keys move, Enter edits a field / selects an action, Space toggles, Left/
+Right switch the mode. Every collector option is exposed (site, drop location,
+operator, active/passive, interface, WiFi on/off, listen seconds, nmap cap,
+output file). If curses can't start (no TTY), it falls back to a plain
+question-and-answer wizard automatically. It just assembles and runs
+`collect.py` — nothing you can't also do by hand below.
+
+### Run — by hand (flags)
 
 ```bash
 # Active scan (default) — probes with arp-scan + nmap. Needs sudo.
-sudo python3 collect.py --site "Acme Dental" -o acme.json
+sudo python3 collect.py --site "Acme Dental" --location "reception jack" -o acme.json
 
 # Passive — listen only (LLDP + mDNS + ARP/DHCP sniff) + WiFi scan.
 # For sensitive sites or when an incumbent MSP is watching.
