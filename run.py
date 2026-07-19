@@ -41,6 +41,9 @@ def make_fields() -> list[dict]:
         {"key": "mode", "label": "Scan mode", "kind": "choice", "value": "active", "choices": ["active", "passive"], "hint": "active probes (arp-scan+nmap); passive only listens"},
         {"key": "iface", "label": "Interface", "kind": "text", "value": "", "hint": "blank = auto-detect the default route's NIC"},
         {"key": "wifi", "label": "WiFi survey", "kind": "bool", "value": True, "hint": "scan nearby SSIDs / encryption"},
+        {"key": "wifi_monitor", "label": "Monitor iface", "kind": "text", "value": "", "hint": "monitor-mode adapter (e.g. wlan1, Alfa card); blank = basic scan"},
+        {"key": "speedtest", "label": "WAN speed test", "kind": "bool", "value": False, "hint": "measures the internet circuit — saturates it for ~30s"},
+        {"key": "snmp_community", "label": "SNMP community", "kind": "text", "value": "public", "hint": "comma-separated read communities to try"},
         {"key": "listen", "label": "Listen seconds", "kind": "text", "value": "20", "hint": "time for passive listeners (LLDP/mDNS/sniff)"},
         {"key": "nmap_timeout", "label": "nmap cap (s)", "kind": "text", "value": "1800", "hint": "hard limit on the active nmap phase"},
         {"key": "output", "label": "Output file", "kind": "text", "value": default_output(), "hint": "where the snapshot JSON is written"},
@@ -64,6 +67,12 @@ def build_argv(fields: list[dict]) -> list[str]:
         argv += ["--iface", f["iface"].strip()]
     if not f["wifi"]:
         argv += ["--no-wifi"]
+    if f["wifi_monitor"].strip():
+        argv += ["--wifi-monitor", f["wifi_monitor"].strip()]
+    if f["speedtest"]:
+        argv += ["--speedtest"]
+    if f["snmp_community"].strip() and f["snmp_community"].strip() != "public":
+        argv += ["--snmp-community", f["snmp_community"].strip()]
     if str(f["listen"]).strip().isdigit():
         argv += ["--listen", str(f["listen"]).strip()]
     if str(f["nmap_timeout"]).strip().isdigit():
