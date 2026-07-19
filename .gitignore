@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+# real scan outputs — may contain client network data, never commit
+*.json
+!sample-snapshot.json

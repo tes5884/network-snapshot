@@ -1,0 +1,311 @@
+{
+  "schema_version": "1.0",
+  "scan": {
+    "started_at": "2026-07-18T14:02:00+00:00",
+    "finished_at": "2026-07-18T14:11:20+00:00",
+    "duration_seconds": 560,
+    "mode": "active",
+    "collector_version": "0.1.0",
+    "site_label": "Acme Dental (DEMO)",
+    "operator": "tzvi",
+    "interface": {
+      "name": "eth0",
+      "mac": "dc:a6:32:aa:bb:cc",
+      "ipv4": "10.0.0.50",
+      "cidr": "10.0.0.0/24",
+      "gateway": "10.0.0.1"
+    },
+    "coverage_note": "single broadcast domain (10.0.0.0/24) from this port; no VLAN tags seen (looks flat / unmanaged switch)",
+    "steps": [
+      {
+        "step": "arp_scan",
+        "ok": true,
+        "seconds": 6.2
+      },
+      {
+        "step": "nmap",
+        "ok": true,
+        "seconds": 512.0
+      }
+    ],
+    "tools_present": {
+      "nmap": true,
+      "arp-scan": true,
+      "tcpdump": true,
+      "avahi-browse": true,
+      "lldpctl": false,
+      "nmcli": true
+    }
+  },
+  "hosts": [
+    {
+      "ipv4": "10.0.0.1",
+      "mac": "18:e8:29:11:22:33",
+      "vendor": "Ubiquiti Inc",
+      "hostname": "UDM-Pro",
+      "discovered_by": [
+        "arp",
+        "nmap"
+      ],
+      "os_guess": {
+        "name": "Linux 4.x",
+        "accuracy": 95
+      },
+      "open_ports": [
+        {
+          "port": 443,
+          "proto": "tcp",
+          "service": "https",
+          "title": "UniFi OS"
+        },
+        {
+          "port": 22,
+          "proto": "tcp",
+          "service": "ssh"
+        }
+      ]
+    },
+    {
+      "ipv4": "10.0.0.10",
+      "mac": "00:50:56:9a:00:01",
+      "vendor": "VMware",
+      "hostname": "esxi-01",
+      "discovered_by": [
+        "arp",
+        "nmap"
+      ],
+      "os_guess": {
+        "name": "VMware ESXi 7.0",
+        "accuracy": 92
+      },
+      "open_ports": [
+        {
+          "port": 443,
+          "proto": "tcp",
+          "service": "https",
+          "title": "VMware ESXi"
+        },
+        {
+          "port": 902,
+          "proto": "tcp",
+          "service": "vmware-auth"
+        }
+      ]
+    },
+    {
+      "ipv4": "10.0.0.20",
+      "mac": "00:11:32:aa:bb:01",
+      "vendor": "Synology",
+      "hostname": "NAS01",
+      "discovered_by": [
+        "arp",
+        "nmap"
+      ],
+      "open_ports": [
+        {
+          "port": 445,
+          "proto": "tcp",
+          "service": "microsoft-ds"
+        },
+        {
+          "port": 5001,
+          "proto": "tcp",
+          "service": "https",
+          "title": "Synology DSM"
+        }
+      ],
+      "smb": {
+        "os": "Windows 6.1",
+        "shares": [
+          {
+            "name": "public",
+            "anonymous": true,
+            "access": "READ"
+          },
+          {
+            "name": "backups",
+            "anonymous": true,
+            "access": "WRITE"
+          }
+        ]
+      }
+    },
+    {
+      "ipv4": "10.0.0.31",
+      "mac": "ac:cc:8e:11:00:01",
+      "vendor": "Axis Communications",
+      "hostname": "AXIS-lobby",
+      "discovered_by": [
+        "arp",
+        "nmap",
+        "mdns"
+      ],
+      "open_ports": [
+        {
+          "port": 554,
+          "proto": "tcp",
+          "service": "rtsp"
+        },
+        {
+          "port": 80,
+          "proto": "tcp",
+          "service": "http",
+          "title": "AXIS Login"
+        }
+      ],
+      "mdns_services": [
+        "_rtsp._tcp"
+      ]
+    },
+    {
+      "ipv4": "10.0.0.32",
+      "mac": "ac:cc:8e:11:00:02",
+      "vendor": "Axis Communications",
+      "hostname": "AXIS-hall",
+      "discovered_by": [
+        "arp",
+        "nmap"
+      ],
+      "open_ports": [
+        {
+          "port": 554,
+          "proto": "tcp",
+          "service": "rtsp"
+        },
+        {
+          "port": 80,
+          "proto": "tcp",
+          "service": "http"
+        }
+      ]
+    },
+    {
+      "ipv4": "10.0.0.40",
+      "mac": "3c:2a:f4:00:aa:01",
+      "vendor": "Brother",
+      "hostname": "BRN3C2AF4",
+      "discovered_by": [
+        "arp",
+        "mdns"
+      ],
+      "open_ports": [
+        {
+          "port": 9100,
+          "proto": "tcp",
+          "service": "jetdirect"
+        },
+        {
+          "port": 631,
+          "proto": "tcp",
+          "service": "ipp"
+        }
+      ],
+      "mdns_services": [
+        "_ipp._tcp",
+        "_pdl-datastream._tcp"
+      ]
+    },
+    {
+      "ipv4": "10.0.0.55",
+      "mac": "b8:27:eb:00:00:aa",
+      "vendor": "Raspberry Pi Foundation",
+      "hostname": "unknown-pi",
+      "discovered_by": [
+        "arp",
+        "nmap"
+      ],
+      "os_guess": {
+        "name": "Linux",
+        "accuracy": 88
+      },
+      "open_ports": [
+        {
+          "port": 80,
+          "proto": "tcp",
+          "service": "http",
+          "title": "DVR WebViewer"
+        }
+      ]
+    },
+    {
+      "ipv4": "10.0.0.101",
+      "mac": "f0:9f:c2:00:00:01",
+      "vendor": "Dell",
+      "hostname": "DESKTOP-A1B2C3",
+      "discovered_by": [
+        "arp",
+        "nmap"
+      ],
+      "os_guess": {
+        "name": "Microsoft Windows 10",
+        "accuracy": 96
+      },
+      "open_ports": [
+        {
+          "port": 3389,
+          "proto": "tcp",
+          "service": "ms-wbt-server"
+        },
+        {
+          "port": 445,
+          "proto": "tcp",
+          "service": "microsoft-ds"
+        }
+      ]
+    },
+    {
+      "ipv4": "10.0.0.150",
+      "mac": "00:04:f2:00:00:aa",
+      "vendor": "Polycom",
+      "hostname": "phone-reception",
+      "discovered_by": [
+        "arp"
+      ],
+      "open_ports": [
+        {
+          "port": 5060,
+          "proto": "tcp",
+          "service": "sip"
+        }
+      ]
+    }
+  ],
+  "network": {
+    "subnets_seen": [
+      "10.0.0.0/24"
+    ],
+    "vlans_seen": [],
+    "lldp_neighbors": [
+      {
+        "local_port": "eth0",
+        "switch_name": null,
+        "switch_port": null,
+        "vlan": null,
+        "source": "tcpdump"
+      }
+    ]
+  },
+  "wifi": [
+    {
+      "ssid": "Acme-Corp",
+      "channel": 36,
+      "band": "5GHz",
+      "security": "WPA2",
+      "signal": 82
+    },
+    {
+      "ssid": "Acme-Guest",
+      "channel": 6,
+      "band": "2.4GHz",
+      "security": "OPEN",
+      "signal": 74
+    },
+    {
+      "ssid": "linksys",
+      "channel": 11,
+      "band": "2.4GHz",
+      "security": "WPA2",
+      "signal": 40
+    }
+  ]
+}
