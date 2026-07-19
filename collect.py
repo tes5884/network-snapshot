@@ -98,6 +98,10 @@ TOOLS = [
     ("nmcli", "network-manager", "WiFi scan (managed mode)", False),
     ("iw", "iw", "WiFi info / monitor-mode fallback", False),
     ("airodump-ng", "aircrack-ng", "monitor-mode WiFi survey", False),
+    ("dig", "dnsutils", "reverse DNS + zone-transfer (AXFR)", False),
+    ("nbtscan", "nbtscan", "NetBIOS names + workgroup/domain", False),
+    ("onesixtyone", "onesixtyone", "SNMP host + community discovery", False),
+    ("speedtest-cli", "speedtest-cli", "WAN bandwidth (opt-in --speedtest)", False),
 ]
 
 
@@ -486,6 +490,152 @@ def snmp_topology(targets: list[str], communities: list[str]) -> dict:
     return {"devices": devices, "edges": edges}
 
 
+# ── DNS: reverse-resolve hosts + zone-transfer (AXFR) attempt ────────────────
+# Reverse-DNS turns IPs into real hostnames. AXFR, if the DNS server allows it
+# (common misconfig in SMBs), dumps the ENTIRE internal zone — every host, even
+# ones that were quiet during the scan. Highest-leverage inventory source.
+
+def _resolv_conf() -> tuple[list[str], list[str]]:
+    servers, domains = [], []
+    try:
+        with open("/etc/resolv.conf") as f:
+            for ln in f:
+                p = ln.split()
+                if len(p) >= 2 and p[0] == "nameserver":
+                    servers.append(p[1])
+                elif len(p) >= 2 and p[0] in ("search", "domain"):
+                    domains += p[1:]
+    except OSError:
+        pass
+    return servers, domains
+
+
+def parse_axfr(text: str) -> list[dict]:
+    """dig +noall +answer AXFR output → records. Testable."""
+    recs = []
+    for ln in text.splitlines():
+        p = ln.split()
+        if len(p) >= 5 and p[2] == "IN":
+            recs.append({"name": p[0].rstrip("."), "type": p[3], "value": " ".join(p[4:]).rstrip(".")})
+    return recs
+
+
+def dns_recon(hosts: list[dict], gateway: str | None, domain_hints: list[str]) -> dict:
+    result = {"servers": [], "domains": [], "reverse": {}, "axfr": {}, "axfr_open": False}
+    if not have("dig"):
+        return result
+    servers, domains = _resolv_conf()
+    if gateway:
+        servers.append(gateway)
+    for h in hosts:
+        if any(p.get("port") == 53 for p in h.get("open_ports", [])):
+            servers.append(h["ipv4"])
+    servers = list(dict.fromkeys(s for s in servers if s))
+    domains = list(dict.fromkeys([*domains, *domain_hints]))
+    result["servers"] = servers
+    if not servers:
+        return result
+    primary = servers[0]
+
+    def rev(h):
+        rc, out, _ = run(["dig", "+short", "-x", h["ipv4"], "@" + primary], 5)
+        nm = out.strip().splitlines()[0].rstrip(".") if out.strip() else None
+        return h["ipv4"], (nm or None)
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for ip, nm in pool.map(rev, hosts):
+            if nm:
+                result["reverse"][ip] = nm
+                host = next((x for x in hosts if x["ipv4"] == ip), None)
+                if host:
+                    host["dns_name"] = nm
+                if "." in nm:
+                    dom = nm.split(".", 1)[1]
+                    if dom not in domains:
+                        domains.append(dom)
+    result["domains"] = domains
+
+    for server in servers[:3]:
+        for dom in domains[:5]:
+            rc, out, _ = run(["dig", "+noall", "+answer", "-t", "AXFR", dom, "@" + server], 20)
+            recs = parse_axfr(out)
+            if len(recs) > 1:  # a real transfer returns the whole zone
+                result["axfr"][f"{dom}@{server}"] = recs
+                result["axfr_open"] = True
+    return result
+
+
+# ── NetBIOS: Windows names + workgroup/domain ────────────────────────────────
+
+def parse_nbtscan(text: str) -> dict[str, str]:
+    names = {}
+    for ln in text.splitlines():
+        m = re.match(r"^(\d+\.\d+\.\d+\.\d+)\s+([^\s<]+)", ln)
+        if m and m.group(2) not in ("Name", "-", "Sendto"):
+            names.setdefault(m.group(1), m.group(2).strip("\\"))
+    return names
+
+
+def netbios_scan(cidr: str) -> dict[str, str]:
+    if not have("nbtscan") or not cidr:
+        return {}
+    rc, out, _ = run(["nbtscan", cidr], 60)
+    return parse_nbtscan(out)
+
+
+# ── SNMP discovery (onesixtyone) — find every SNMP host + working community ──
+
+def parse_onesixtyone(text: str) -> dict[str, dict]:
+    found = {}
+    for ln in text.splitlines():
+        m = re.match(r"^(\d+\.\d+\.\d+\.\d+)\s+\[([^\]]+)\]\s*(.*)$", ln)
+        if m:
+            found[m.group(1)] = {"community": m.group(2), "sysdescr": m.group(3).strip()}
+    return found
+
+
+def snmp_discover(cidr: str, communities: list[str]) -> dict[str, dict]:
+    if not have("onesixtyone") or not cidr:
+        return {}
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write("\n".join(communities) + "\n")
+        path = f.name
+    try:
+        rc, out, _ = run(["onesixtyone", "-c", path, cidr], 90)
+        return parse_onesixtyone(out)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+# ── WAN speed test (opt-in — saturates the circuit for ~30s) ─────────────────
+
+def speed_test() -> dict | None:
+    tool = "speedtest-cli" if have("speedtest-cli") else ("speedtest" if have("speedtest") else None)
+    if not tool:
+        return None
+    args_ = ["--json"] if tool == "speedtest-cli" else ["--format=json", "--accept-license", "--accept-gdpr"]
+    rc, out, _ = run([tool] + args_, 120)
+    try:
+        d = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+    except (ValueError, IndexError):
+        return None
+    if tool == "speedtest-cli":
+        return {"download_mbps": round(d.get("download", 0) / 1e6, 1),
+                "upload_mbps": round(d.get("upload", 0) / 1e6, 1),
+                "ping_ms": round(d.get("ping", 0), 1),
+                "isp": (d.get("client") or {}).get("isp"),
+                "server": (d.get("server") or {}).get("sponsor")}
+    return {"download_mbps": round(d.get("download", {}).get("bandwidth", 0) * 8 / 1e6, 1),
+            "upload_mbps": round(d.get("upload", {}).get("bandwidth", 0) * 8 / 1e6, 1),
+            "ping_ms": round(d.get("ping", {}).get("latency", 0), 1),
+            "isp": d.get("isp"),
+            "server": (d.get("server") or {}).get("name")}
+
+
 # ── WiFi scan ────────────────────────────────────────────────────────────────
 
 def scan_wifi() -> list[dict]:
@@ -714,8 +864,36 @@ def collect(args) -> dict:
         if any(p.get("port") == 161 for p in h.get("open_ports", [])) or NETGEAR.search(h.get("vendor") or ""):
             snmp_targets.append(ip)
     communities = [c.strip() for c in (args.snmp_community or "public").split(",") if c.strip()]
+    cidr = iface_info.get("cidr")
+    # onesixtyone: sweep the subnet for every SNMP responder + working community,
+    # then feed those into the topology walk (active only).
+    if not args.passive and cidr:
+        log("SNMP discovery (onesixtyone)…")
+        disc = step("snmp_discover", lambda: snmp_discover(cidr, communities)) or {}
+        for ip, info in disc.items():
+            if ip not in snmp_targets:
+                snmp_targets.append(ip)
+            if info.get("community") and info["community"] not in communities:
+                communities.append(info["community"])
     log(f"SNMP topology ({len(snmp_targets)} target(s), communities {communities})…")
     snmp = step("snmp", lambda: snmp_topology(snmp_targets, communities)) or {"devices": [], "edges": []}
+
+    # DNS (reverse + AXFR), NetBIOS names, WAN speed — active-side enrichment.
+    dns = {"servers": [], "domains": [], "reverse": {}, "axfr": {}, "axfr_open": False}
+    netbios: dict = {}
+    wan = None
+    if not args.passive:
+        log("DNS recon (reverse + AXFR attempt)…")
+        dns = step("dns", lambda: dns_recon(hosts, gw, [])) or dns
+        if cidr:
+            log("NetBIOS sweep…")
+            netbios = step("netbios", lambda: netbios_scan(cidr)) or {}
+            for h in hosts:
+                if h["ipv4"] in netbios:
+                    h["netbios_name"] = netbios[h["ipv4"]]
+    if args.speedtest:
+        log("WAN speed test (saturates the circuit ~30s)…")
+        wan = step("speedtest", speed_test)
 
     # Gateway / firewall identity — combine host record + any SNMP identity.
     gw_host = next((h for h in hosts if h["ipv4"] == gw), None)
@@ -765,6 +943,9 @@ def collect(args) -> dict:
             "gateway": gateway,
             "snmp_devices": snmp["devices"],
             "topology_edges": snmp["edges"],
+            "dns": dns,
+            "netbios": netbios,
+            "wan": wan,
         },
         "wifi": wifi,
     }
@@ -831,6 +1012,16 @@ def demo_snapshot() -> dict:
                 {"from": "SW-CORE", "from_port": "24", "to": "SW-FLOOR2", "to_port": "Gi1/0/48"},
                 {"from": "SW-FLOOR2", "from_port": "48", "to": "SW-CORE", "to_port": "Port 24"},
             ],
+            "dns": {
+                "servers": ["10.0.0.1"], "domains": ["acme.local"], "axfr_open": True,
+                "reverse": {"10.0.0.20": "nas01.acme.local", "10.0.0.101": "reception-pc.acme.local"},
+                "axfr": {"acme.local@10.0.0.1": [
+                    {"name": "dc1.acme.local", "type": "A", "value": "10.0.0.6"},
+                    {"name": "nas01.acme.local", "type": "A", "value": "10.0.0.20"},
+                    {"name": "timeclock.acme.local", "type": "A", "value": "10.0.0.77"}]},
+            },
+            "netbios": {"10.0.0.101": "RECEPTION-PC", "10.0.0.6": "DC1"},
+            "wan": {"download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "Optimum", "server": "New York, NY"},
         },
         "wifi": [
             {"ssid": "Acme-Corp", "channel": 36, "band": "5GHz", "security": "WPA2", "signal": 82},
@@ -869,6 +1060,8 @@ def main() -> int:
     ap.add_argument("--wifi-seconds", type=int, default=45, help="monitor-mode capture duration")
     ap.add_argument("--snmp-community", default="public",
                     help="comma-separated SNMP read communities to try for topology (default: public)")
+    ap.add_argument("--speedtest", action="store_true",
+                    help="run a WAN speed test (saturates the internet circuit for ~30s)")
     ap.add_argument("--listen", type=int, default=20, help="seconds for passive listeners")
     ap.add_argument("--nmap-timeout", type=int, default=1800, help="hard cap on nmap (s)")
     ap.add_argument("--demo", action="store_true", help="emit a sample snapshot, no network")

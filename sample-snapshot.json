@@ -351,7 +351,50 @@
         "to": "SW-CORE",
         "to_port": "Port 24"
       }
-    ]
+    ],
+    "dns": {
+      "servers": [
+        "10.0.0.1"
+      ],
+      "domains": [
+        "acme.local"
+      ],
+      "axfr_open": true,
+      "reverse": {
+        "10.0.0.20": "nas01.acme.local",
+        "10.0.0.101": "reception-pc.acme.local"
+      },
+      "axfr": {
+        "acme.local@10.0.0.1": [
+          {
+            "name": "dc1.acme.local",
+            "type": "A",
+            "value": "10.0.0.6"
+          },
+          {
+            "name": "nas01.acme.local",
+            "type": "A",
+            "value": "10.0.0.20"
+          },
+          {
+            "name": "timeclock.acme.local",
+            "type": "A",
+            "value": "10.0.0.77"
+          }
+        ]
+      }
+    },
+    "netbios": {
+      "10.0.0.101": "RECEPTION-PC",
+      "10.0.0.6": "DC1"
+    },
+    "wan": {
+      "download_mbps": 187.4,
+      "upload_mbps": 21.6,
+      "ping_ms": 12.3,
+      "isp": "Optimum",
+      "server": "New York, NY"
+    }
   },
   "wifi": [
     {

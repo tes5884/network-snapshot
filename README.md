@@ -92,6 +92,10 @@ know or care where it lands — it just hits the webhook.
 | Switch / VLAN | `lldpctl`/`tcpdump` | both | switch name, port, VLAN (topology) |
 | Service announce | `avahi-browse` | both | mDNS service types → device roles |
 | WiFi survey | `nmcli` | both | SSIDs, encryption, channel, signal |
+| DNS recon | `dig` | active | reverse-DNS host names + AXFR zone dump (full inventory if the DNS server allows it) |
+| NetBIOS | `nbtscan` | active | Windows names + workgroup/domain |
+| SNMP discovery | `onesixtyone` | active | every SNMP responder + working community → feeds topology |
+| WAN speed | `speedtest-cli` | opt-in `--speedtest` | download/upload/ping of the internet circuit |
 
 Every step is isolated — a missing tool or a failure is recorded in
 `scan.steps[]` and never aborts the scan. `scan.tools_present` reports what was
