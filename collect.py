@@ -902,10 +902,21 @@ def collect(args) -> dict:
     gateway = None
     if gw:
         titles = [p.get("title") for p in (gw_host or {}).get("open_ports", []) if p.get("title")]
+        # nmap reports redirects as "Did not follow redirect to https://opnsense/"
+        # — the useful bit is the host in that URL.
+        clean_titles = []
+        for t in titles:
+            m = re.search(r"redirect to https?://([^/\s]+)", t or "")
+            clean_titles.append(m.group(1) if m else t)
+        identity = ((gw_snmp or {}).get("sysdescr")
+                    or (gw_host or {}).get("hostname")
+                    or (gw_host or {}).get("dns_name")
+                    or (gw_host or {}).get("netbios_name")
+                    or (clean_titles[0] if clean_titles else None))
         gateway = {
             "ipv4": gw,
             "vendor": (gw_host or {}).get("vendor"),
-            "identity": (gw_snmp or {}).get("sysdescr") or (titles[0] if titles else None),
+            "identity": identity,
             "role_guess": (gw_snmp or {}).get("role_guess") or "router/firewall",
         }
 
