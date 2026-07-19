@@ -346,6 +346,107 @@ def scan_wifi() -> list[dict]:
     return aps
 
 
+# ── WiFi monitor-mode survey (optional — needs a monitor-capable adapter) ────
+# Managed-mode scan_wifi() sees SSIDs+encryption. A monitor-mode adapter (e.g.
+# Alfa AWUS036ACH/ACM) passively captures ALL 802.11 frames, giving per-AP
+# client counts, hidden SSIDs (BSSID even when cloaked), and channel use — a
+# much richer picture for onboarding scoping. Passive only; we never inject.
+
+def _band_for_channel(ch: int | None) -> str | None:
+    if not ch:
+        return None
+    return "2.4GHz" if ch <= 14 else "6GHz" if ch >= 233 else "5GHz"
+
+
+def parse_airodump_csv(text: str) -> dict:
+    """Parse an airodump-ng CSV dump into {aps, clients}. Pure function so the
+    parsing is testable without hardware."""
+    lines = text.splitlines()
+    # The file has two sections: APs, then a blank line + a 'Station MAC' header.
+    split_at = next((i for i, ln in enumerate(lines) if ln.strip().startswith("Station MAC")), len(lines))
+    ap_rows, sta_rows = lines[:split_at], lines[split_at:]
+
+    def cells(ln: str) -> list[str]:
+        return [c.strip() for c in ln.split(",")]
+
+    # Clients: map station → associated BSSID; count per BSSID.
+    clients_by_bssid: dict[str, int] = {}
+    clients: list[dict] = []
+    for ln in sta_rows[1:]:
+        c = cells(ln)
+        if len(c) < 6 or not re.match(r"[0-9A-Fa-f:]{17}", c[0]):
+            continue
+        bssid = c[5].upper()
+        clients.append({"mac": c[0].upper(), "bssid": bssid if bssid != "(NOT ASSOCIATED)" else None,
+                        "signal": int(c[3]) if c[3].lstrip("-").isdigit() else None})
+        if bssid and bssid != "(NOT ASSOCIATED)":
+            clients_by_bssid[bssid] = clients_by_bssid.get(bssid, 0) + 1
+
+    aps: list[dict] = []
+    for ln in ap_rows[1:]:  # skip header
+        c = cells(ln)
+        if len(c) < 14 or not re.match(r"[0-9A-Fa-f:]{17}", c[0]):
+            continue
+        bssid = c[0].upper()
+        ch = int(c[3]) if c[3].lstrip("-").isdigit() else None
+        essid = c[13]
+        sec = " ".join(x for x in (c[5], c[6], c[7]) if x).strip() or "OPEN"
+        aps.append({
+            "bssid": bssid,
+            "ssid": essid or "(hidden)",
+            "hidden": not essid,
+            "channel": ch,
+            "band": _band_for_channel(ch),
+            "security": sec,
+            "signal": int(c[8]) if c[8].lstrip("-").isdigit() else None,
+            "clients": clients_by_bssid.get(bssid, 0),
+        })
+    return {"aps": aps, "clients": clients}
+
+
+def monitor_wifi(mon_iface: str, seconds: int) -> list[dict]:
+    """Put the adapter in monitor mode, capture with airodump-ng for `seconds`
+    (it channel-hops automatically), parse, and restore. UNTESTED against real
+    hardware — written for when the Alfa card arrives; degrades if tools/adapter
+    absent."""
+    if not (have("airodump-ng") and mon_iface):
+        return []
+    started_managed = False
+    dev = mon_iface
+    try:
+        if have("airmon-ng"):
+            run(["airmon-ng", "check", "kill"], 15)
+            rc, out, _ = run(["airmon-ng", "start", mon_iface], 20)
+            m = re.search(r"(monitor mode.*enabled.*?(\w+mon\w*|\w+))", out)
+            dev = (m.group(2) if m else mon_iface + "mon")
+            started_managed = True
+        else:
+            run(["ip", "link", "set", mon_iface, "down"], 10)
+            run(["iw", "dev", mon_iface, "set", "type", "monitor"], 10)
+            run(["ip", "link", "set", mon_iface, "up"], 10)
+        prefix = "/tmp/snapshot-wifi"
+        run(["rm", "-f"] + [prefix + s for s in ("-01.csv", "-01.cap")], 5)
+        # airodump runs until timeout; `run` kills it at the deadline.
+        run(["airodump-ng", "--output-format", "csv", "--write-interval", "1", "-w", prefix, dev],
+            seconds + 3)
+        try:
+            with open(prefix + "-01.csv") as f:
+                parsed = parse_airodump_csv(f.read())
+            return parsed["aps"]
+        except FileNotFoundError:
+            return []
+    finally:
+        # Restore managed mode so the laptop's WiFi works again.
+        if have("airmon-ng") and started_managed:
+            run(["airmon-ng", "stop", dev], 15)
+            if have("nmcli"):
+                run(["nmcli", "radio", "wifi", "on"], 10)
+        elif have("iw"):
+            run(["ip", "link", "set", dev, "down"], 10)
+            run(["iw", "dev", dev, "set", "type", "managed"], 10)
+            run(["ip", "link", "set", dev, "up"], 10)
+
+
 # ── Merge + assemble ─────────────────────────────────────────────────────────
 
 def merge_hosts(*sources: dict[str, dict]) -> list[dict]:
@@ -415,8 +516,12 @@ def collect(args) -> dict:
     lldp = step("lldp", lambda: capture_lldp(iface, args.listen)) or [] if iface else []
     wifi = []
     if not args.no_wifi:
-        log("WiFi scan…")
-        wifi = step("wifi", scan_wifi) or []
+        if args.wifi_monitor:
+            log(f"WiFi monitor-mode survey on {args.wifi_monitor} ({args.wifi_seconds}s)…")
+            wifi = step("wifi_monitor", lambda: monitor_wifi(args.wifi_monitor, args.wifi_seconds)) or []
+        if not wifi:
+            log("WiFi scan (managed)…")
+            wifi = step("wifi", scan_wifi) or []
 
     hosts = merge_hosts(arp, nmap, passive_hosts)
     attach_mdns(hosts, mdns)
@@ -535,6 +640,9 @@ def main() -> int:
     ap.add_argument("--passive", action="store_true", help="listen only — no arp-scan/nmap probing")
     ap.add_argument("--iface", default=None, help="force interface (else auto-detect)")
     ap.add_argument("--no-wifi", action="store_true", help="skip the WiFi scan")
+    ap.add_argument("--wifi-monitor", default=None, metavar="IFACE",
+                    help="monitor-capable adapter (e.g. wlan1) for a richer passive survey — client counts, hidden SSIDs, channel use (needs airodump-ng)")
+    ap.add_argument("--wifi-seconds", type=int, default=45, help="monitor-mode capture duration")
     ap.add_argument("--listen", type=int, default=20, help="seconds for passive listeners")
     ap.add_argument("--nmap-timeout", type=int, default=1800, help="hard cap on nmap (s)")
     ap.add_argument("--demo", action="store_true", help="emit a sample snapshot, no network")

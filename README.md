@@ -168,5 +168,14 @@ example to develop the report against with no live network.
 - **Next:** report engine — deterministic categorization + risk flags, then an
   AI pass for the executive narrative, significance ranking, and onboarding
   scoping. Rendered as a styled HTML/PDF, attachable to a TEQhub proposal.
+- **Monitor-mode WiFi** (built, untested until the Alfa card arrives): pass
+  `--wifi-monitor wlan1` for a passive full-RF survey — per-AP client counts,
+  hidden SSIDs, channel congestion — instead of the basic managed scan. Needs a
+  monitor-capable adapter (Alfa AWUS036ACH/ACM) on native Linux. Passive only;
+  never injects.
+- **SNMP topology** (planned): walk switch/router SNMP (LLDP-MIB, BRIDGE-MIB,
+  IF-MIB) to reconstruct the physical diagram — which switch links where, what
+  is on each port, the router/firewall. Gated on SNMP access (community string
+  or client-provided read-only creds).
 - **Later:** Raspberry Pi drop-box image + phone-home upload, so it can be left
   running and collected remotely.
