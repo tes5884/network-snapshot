@@ -44,6 +44,7 @@ import sys
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 COLLECTOR_VERSION = "0.1.0"
