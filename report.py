@@ -168,6 +168,12 @@ section:first-of-type{border-top:0}
 .wan-cards .wc.pg .n .arw{color:var(--ink-3)}
 .wan-cards .wc .u{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
 .wan-cap{margin-top:11px;font-size:12px;color:var(--ink-3);text-align:center}
+.wan-cap code{font-family:var(--mono);font-size:11px;background:var(--ground);padding:1px 4px;border-radius:3px}
+.wan-ip{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;border:1px solid var(--accent);
+  background:var(--accent-soft);border-radius:8px;padding:14px 18px;margin-bottom:14px}
+.wan-ip .l{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.wan-ip .v{font-size:22px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+.wan-ip .o{font-size:12px;color:var(--ink-3);margin-left:auto}
 
 .foot{padding:22px 48px 34px;color:var(--ink-3);font-size:11.5px;line-height:1.6;
   border-top:1px solid var(--line)}
@@ -472,26 +478,36 @@ def render(model, narrative_md=None):
                      f'<td>{pill}</td><td class="num">{esc(sig)+"%" if sig is not None else "—"}</td></tr>')
         P.append('</table></div></section>')
 
-    # ── 06 WAN / speed test ──
-    if wan.get("download_mbps") is not None:
+    # ── 06 WAN — public IP (always, when reachable) + speed test (opt-in) ──
+    has_speed = wan.get("download_mbps") is not None
+    if wan.get("public_ip") or has_speed:
         server = wan.get("server")
-        hint = " · ".join(x for x in [wan.get("isp"), server] if x)
+        hint = " · ".join(x for x in [wan.get("isp"), wan.get("geo")] if x)
         P.append('<section><div class="pad">')
-        P.append(head("Internet Circuit", esc(hint) + (" — WAN speed test" if hint else "measured WAN speed test")))
-        P.append('<div class="wan-cards">')
-        cards = [
-            ("dn", "▼", f'{wan.get("download_mbps"):.0f}', "Mbps download"),
-            ("up", "▲", f'{wan.get("upload_mbps"):.0f}' if wan.get("upload_mbps") is not None else "—", "Mbps upload"),
-            ("pg", "•", f'{wan.get("ping_ms"):.0f}' if wan.get("ping_ms") is not None else "—", "ms latency"),
-        ]
-        for cls, arw, n, u in cards:
-            P.append(f'<div class="wc {cls}"><div class="n mono"><span class="arw">{arw}</span>{esc(n)}</div>'
-                     f'<div class="u">{esc(u)}</div></div>')
-        P.append('</div>')
-        if wan.get("isp") or server:
-            P.append(f'<div class="wan-cap">Measured live during the scan'
-                     + (f' against {esc(server)}' if server else "")
-                     + (f' via {esc(wan.get("isp"))}' if wan.get("isp") else "") + '.</div>')
+        P.append(head("Internet Circuit", esc(hint)))
+        # Public IP band — the WAN address, prominent.
+        if wan.get("public_ip"):
+            P.append('<div class="wan-ip"><div class="l">Public / WAN IP</div>'
+                     f'<div class="v mono">{esc(wan["public_ip"])}</div>'
+                     + (f'<div class="o">{esc(wan.get("isp"))}</div>' if wan.get("isp") else "")
+                     + '</div>')
+        if has_speed:
+            P.append('<div class="wan-cards">')
+            cards = [
+                ("dn", "▼", f'{wan.get("download_mbps"):.0f}', "Mbps download"),
+                ("up", "▲", f'{wan.get("upload_mbps"):.0f}' if wan.get("upload_mbps") is not None else "—", "Mbps upload"),
+                ("pg", "•", f'{wan.get("ping_ms"):.0f}' if wan.get("ping_ms") is not None else "—", "ms latency"),
+            ]
+            for cls, arw, n, u in cards:
+                P.append(f'<div class="wc {cls}"><div class="n mono"><span class="arw">{arw}</span>{esc(n)}</div>'
+                         f'<div class="u">{esc(u)}</div></div>')
+            P.append('</div>')
+            if server:
+                P.append(f'<div class="wan-cap">Speed measured live during the scan against {esc(server)}'
+                         + (f' via {esc(wan.get("isp"))}' if wan.get("isp") else "") + '.</div>')
+        else:
+            P.append('<div class="wan-cap">Speed test not run — pass <code>--speedtest</code> to measure '
+                     'download/upload/latency (it briefly saturates the circuit).</div>')
         P.append('</div></section>')
 
     # ── 07 Onboarding scope ──

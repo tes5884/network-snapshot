@@ -95,6 +95,7 @@ know or care where it lands — it just hits the webhook.
 | DNS recon | `dig` | active | reverse-DNS host names + AXFR zone dump (full inventory if the DNS server allows it) |
 | NetBIOS | `nbtscan` | active | Windows names + workgroup/domain |
 | SNMP discovery | `onesixtyone` | active | every SNMP responder + working community → feeds topology |
+| Public/WAN IP | `urllib` (ipinfo) | both | the site's public IP + ISP/org — one outbound request, doesn't touch the LAN |
 | WAN speed | `speedtest-cli` | opt-in `--speedtest` | download/upload/ping of the internet circuit |
 
 Every step is isolated — a missing tool or a failure is recorded in

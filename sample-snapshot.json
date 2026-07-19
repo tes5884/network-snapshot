@@ -389,10 +389,12 @@
       "10.0.0.6": "DC1"
     },
     "wan": {
+      "public_ip": "203.0.113.47",
       "download_mbps": 187.4,
       "upload_mbps": 21.6,
       "ping_ms": 12.3,
       "isp": "Optimum",
+      "geo": "New York, NY",
       "server": "New York, NY"
     }
   },

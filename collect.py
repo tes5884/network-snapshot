@@ -629,12 +629,39 @@ def speed_test() -> dict | None:
                 "upload_mbps": round(d.get("upload", 0) / 1e6, 1),
                 "ping_ms": round(d.get("ping", 0), 1),
                 "isp": (d.get("client") or {}).get("isp"),
+                "public_ip": (d.get("client") or {}).get("ip"),
                 "server": (d.get("server") or {}).get("sponsor")}
     return {"download_mbps": round(d.get("download", {}).get("bandwidth", 0) * 8 / 1e6, 1),
             "upload_mbps": round(d.get("upload", {}).get("bandwidth", 0) * 8 / 1e6, 1),
             "ping_ms": round(d.get("ping", {}).get("latency", 0), 1),
             "isp": d.get("isp"),
+            "public_ip": (d.get("interface") or {}).get("externalIp"),
             "server": (d.get("server") or {}).get("name")}
+
+
+def public_ip() -> dict | None:
+    """The site's public/WAN IP — cheap, always useful (remote access, DNS,
+    firewall scoping), and unlike the speed test it doesn't touch the circuit.
+    One outbound HTTPS request to an IP-echo service; degrades to None offline.
+    ipinfo also returns the ISP/org and rough geo for free."""
+    for url in ("https://ipinfo.io/json", "https://api.ipify.org?format=json"):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "network-snapshot"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                d = json.loads(resp.read().decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001 — offline / blocked / rate-limited
+            continue
+        ip = d.get("ip")
+        if not ip:
+            continue
+        out = {"public_ip": ip}
+        if d.get("org"):
+            out["isp"] = d["org"]
+        geo = ", ".join(x for x in (d.get("city"), d.get("region")) if x)
+        if geo:
+            out["geo"] = geo
+        return out
+    return None
 
 
 # ── WiFi scan ────────────────────────────────────────────────────────────────
@@ -892,9 +919,17 @@ def collect(args) -> dict:
             for h in hosts:
                 if h["ipv4"] in netbios:
                     h["netbios_name"] = netbios[h["ipv4"]]
+    # Public/WAN IP is cheap and always worth having (one outbound request);
+    # the speed test is opt-in because it saturates the circuit. When both run,
+    # the speed test's own ISP/IP readings win (cleaner than the echo service).
+    log("Public IP lookup…")
+    wan = step("public_ip", public_ip) or {}
     if args.speedtest:
         log("WAN speed test (saturates the circuit ~30s)…")
-        wan = step("speedtest", speed_test)
+        st = step("speedtest", speed_test)
+        if st:
+            wan.update({k: v for k, v in st.items() if v is not None})
+    wan = wan or None
 
     # Gateway / firewall identity — combine host record + any SNMP identity.
     gw_host = next((h for h in hosts if h["ipv4"] == gw), None)
@@ -1033,7 +1068,7 @@ def demo_snapshot() -> dict:
                     {"name": "timeclock.acme.local", "type": "A", "value": "10.0.0.77"}]},
             },
             "netbios": {"10.0.0.101": "RECEPTION-PC", "10.0.0.6": "DC1"},
-            "wan": {"download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "Optimum", "server": "New York, NY"},
+            "wan": {"public_ip": "203.0.113.47", "download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "Optimum", "geo": "New York, NY", "server": "New York, NY"},
         },
         "wifi": [
             {"ssid": "Acme-Corp", "channel": 36, "band": "5GHz", "security": "WPA2", "signal": 82},
