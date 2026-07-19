@@ -26,9 +26,17 @@ import html
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from analyze import analyze, build_brief, CAT_LABEL, CAT_BLURB
+
+# Reports are read on the US East Coast — show all times in Eastern (handles
+# EST/EDT automatically). Falls back to UTC if the tz database is unavailable.
+try:
+    EASTERN = ZoneInfo("America/New_York")
+except Exception:  # noqa: BLE001 — no tzdata → degrade to UTC rather than crash
+    EASTERN = timezone.utc
 
 # ── Palette / design tokens ──────────────────────────────────────────────────
 # A restrained "security assessment" identity of its own — deliberately NOT
@@ -359,7 +367,10 @@ def render(model, narrative_md=None):
     def fmt_dt(s):
         if not s: return "—"
         try:
-            return datetime.fromisoformat(s.replace("Z", "+00:00")).strftime("%b %-d, %Y · %-I:%M %p")
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:  # naive → assume the collector's UTC
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(EASTERN).strftime("%b %-d, %Y · %-I:%M %p %Z")
         except Exception:
             return esc(s)
 
@@ -548,7 +559,7 @@ def render(model, narrative_md=None):
     if missing:
         P.append(f' Tools unavailable during this scan: {esc(", ".join(missing))}.')
     P.append(f'<br>Collector {esc(scan.get("collector_version") or "?")} · analyzer {esc(model["analyzer_version"])} · '
-             f'generated {esc(datetime.now().strftime("%Y-%m-%d %H:%M"))}.')
+             f'generated {esc(datetime.now(EASTERN).strftime("%Y-%m-%d %H:%M %Z"))}.')
     P.append('</div>')
 
     body = f'<div class="sheet">{"".join(P)}</div>'
