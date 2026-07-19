@@ -1204,6 +1204,8 @@ def main() -> int:
                     help="skip the GitHub version check before scanning")
     args = ap.parse_args()
 
+    log(f"network-snapshot collector v{COLLECTOR_VERSION}  ({REPO_WEB_URL})")
+
     # GitHub is the source of truth — check for a newer version first (skip for
     # offline demo runs). Degrades gracefully if offline.
     if not args.demo and not args.no_update:
