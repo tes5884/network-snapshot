@@ -9,6 +9,22 @@ separately and consumes **only** the JSON described below. That seam is what
 keeps the two halves independent: the report can live in TEQhub today and move
 elsewhere later without touching the collector.
 
+## Source of truth & updates
+
+This GitHub repo is the source of truth. Run the scanning laptop from a clone:
+
+```bash
+git clone https://github.com/tes5884/network-snapshot.git
+cd network-snapshot
+cp submit.conf.example submit.conf   # paste the intake secret
+```
+
+Every scan **checks GitHub for a newer version first** and, if the clone is
+behind, offers to `git pull` and restart with the new code (skip with
+`--no-update`; it degrades silently when offline so field work is never
+blocked). To ship an update: bump `COLLECTOR_VERSION` in `collect.py`, commit,
+and push — field laptops pick it up on their next run.
+
 ## Collector
 
 One Python file, `collect.py`. Dependency-light: it shells out to standard

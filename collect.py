@@ -50,6 +50,11 @@ from datetime import datetime, timezone
 COLLECTOR_VERSION = "0.1.0"
 SCHEMA_VERSION = "1.0"
 
+# GitHub is the source of truth — every run checks for a newer version first.
+REPO_SLUG = "tes5884/network-snapshot"
+REPO_RAW_URL = f"https://raw.githubusercontent.com/{REPO_SLUG}/main/collect.py"
+REPO_WEB_URL = f"https://github.com/{REPO_SLUG}"
+
 # Curated "fingerprint" ports — enough to identify device roles without the
 # noise/time of a full 65k sweep. RTSP=camera, 9100=printer, 3389=RDP, etc.
 FINGERPRINT_PORTS = (
@@ -1082,6 +1087,52 @@ def demo_snapshot() -> dict:
     }
 
 
+def _parse_version(text: str) -> str | None:
+    m = re.search(r"""COLLECTOR_VERSION\s*=\s*["']([0-9]+(?:\.[0-9]+)*)["']""", text)
+    return m.group(1) if m else None
+
+
+def check_for_update(assume_yes: bool = False) -> None:
+    """GitHub is the source of truth. Fetch the latest collector version and, if
+    this copy is behind, offer to update before scanning. Never blocks: any
+    failure (offline, timeout, not a git checkout) prints a soft note and lets
+    the scan proceed — field work must never be stopped by an update check."""
+    try:
+        req = urllib.request.Request(REPO_RAW_URL, headers={"User-Agent": "network-snapshot"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            remote = _parse_version(resp.read().decode("utf-8", "replace"))
+    except Exception as e:  # noqa: BLE001 — offline / blocked / rate-limited
+        log(f"update check skipped ({e})")
+        return
+    if not remote:
+        return
+    try:
+        if tuple(int(x) for x in remote.split(".")) <= tuple(int(x) for x in COLLECTOR_VERSION.split(".")):
+            log(f"collector up to date (v{COLLECTOR_VERSION})")
+            return
+    except ValueError:
+        return
+
+    print(f"\n\033[33m▲ Update available: v{remote} (you have v{COLLECTOR_VERSION}).\033[0m")
+    here = os.path.dirname(os.path.abspath(__file__))
+    is_git = os.path.isdir(os.path.join(here, ".git")) and have("git")
+    if not is_git:
+        print(f"  This copy is not a git checkout. Get the latest with:\n"
+              f"    git clone {REPO_WEB_URL}\n"
+              f"  (or download {REPO_RAW_URL})\n")
+        return
+    if not (assume_yes or input("  Pull the update now? [Y/n]: ").strip().lower() in ("", "y", "yes")):
+        return
+    # sudo runs git as root in a user-owned tree → mark it safe to avoid the
+    # "dubious ownership" refusal.
+    rc, out, err = run(["git", "-c", f"safe.directory={here}", "-C", here, "pull", "--ff-only"], 40)
+    if rc != 0:
+        print(f"  git pull failed: {(err or out).strip()}\n  Update manually: git -C {here} pull\n")
+        return
+    print("  Updated. Restarting with the new version…\n")
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
 def submit(url: str, secret: str | None, snapshot: dict, timeout: int = 60) -> None:
     """POST the snapshot to a collection webhook (n8n). Best-effort: the local
     file is always written first, so a failed upload never loses a scan."""
@@ -1125,7 +1176,14 @@ def main() -> int:
                     help="shared secret sent as x-snapshot-secret (or set SNAPSHOT_SUBMIT_SECRET)")
     ap.add_argument("--no-submit", action="store_true",
                     help="skip auto-submit even if submit.conf / env is configured")
+    ap.add_argument("--no-update", action="store_true",
+                    help="skip the GitHub version check before scanning")
     args = ap.parse_args()
+
+    # GitHub is the source of truth — check for a newer version first (skip for
+    # offline demo runs). Degrades gracefully if offline.
+    if not args.demo and not args.no_update:
+        check_for_update(assume_yes=args.yes)
 
     # Auto-submit config: a `submit.conf` next to this script ({"url","secret"})
     # makes every scan upload with no flag. A file survives sudo (which strips
