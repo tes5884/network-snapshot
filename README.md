@@ -63,23 +63,32 @@ python3 collect.py --demo -o sample-snapshot.json
 Useful flags: `--iface eth0` (force interface), `--no-wifi`, `--listen 30`
 (seconds for passive listeners), `--nmap-timeout 1800`.
 
-### Auto-submit (optional)
+### Auto-submit
 
-After scanning, the collector can POST the snapshot to a webhook — the local
-file is always written first, so a failed upload never loses a scan.
+After scanning, the collector POSTs the snapshot to a webhook — the local file
+is always written first, so a failed upload never loses a scan. It targets, in
+order: `--submit` flag → `SNAPSHOT_SUBMIT_URL` env → a `submit.conf` next to the
+script. **The config file is what makes it automatic in the field:** `sudo`
+strips env vars, but a file survives, so once `submit.conf` exists every scan
+uploads with no flag.
 
 ```bash
-sudo python3 collect.py --site "Acme Dental" \
-  --submit "https://n8n.tspitz.com/webhook/network-snapshot" \
-  --submit-secret "<secret>"
-# or set SNAPSHOT_SUBMIT_URL / SNAPSHOT_SUBMIT_SECRET in the environment
+cp submit.conf.example submit.conf   # then paste the intake secret
+sudo python3 collect.py --site "Acme Dental" -o acme.json   # auto-uploads
+sudo python3 collect.py --site "Acme Dental" --no-submit    # opt out for one run
 ```
 
-The endpoint is an n8n workflow (**Network Snapshot Intake**, secured with an
-`x-snapshot-secret` header). For now it posts a summary + the JSON file to
-Slack; the destination is one node, easy to repoint (Nextcloud, a TEQhub
-endpoint, a data table) when the report engine is ready. The collector doesn't
-know or care where it lands — it just hits the webhook.
+`submit.conf` (gitignored — it holds the secret):
+```json
+{ "url": "https://hub.teqbytes.com/api/network-snapshots/intake", "secret": "<intake secret>" }
+```
+
+The default target is **TEQhub's intake endpoint** (`POST /network-snapshots/
+intake`, secured with an `x-snapshot-secret` header): it analyzes the snapshot,
+auto-matches it to a company by site label, and files it (unmatched scans land
+"unassigned" for the operator to assign in the UI). The collector doesn't know
+or care where it lands — repoint the URL and it hits anything that speaks the
+same POST.
 
 ### What it does
 

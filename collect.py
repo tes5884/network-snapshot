@@ -1123,7 +1123,26 @@ def main() -> int:
                     help="POST the snapshot to this webhook after scanning (or set SNAPSHOT_SUBMIT_URL)")
     ap.add_argument("--submit-secret", default=os.environ.get("SNAPSHOT_SUBMIT_SECRET"),
                     help="shared secret sent as x-snapshot-secret (or set SNAPSHOT_SUBMIT_SECRET)")
+    ap.add_argument("--no-submit", action="store_true",
+                    help="skip auto-submit even if submit.conf / env is configured")
     args = ap.parse_args()
+
+    # Auto-submit config: a `submit.conf` next to this script ({"url","secret"})
+    # makes every scan upload with no flag. A file survives sudo (which strips
+    # env vars); env/flags still override it. This is what "always auto-upload"
+    # relies on in the field.
+    if not args.no_submit and not args.submit:
+        conf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "submit.conf")
+        if os.path.exists(conf_path):
+            try:
+                with open(conf_path) as cf:
+                    conf = json.load(cf)
+                args.submit = conf.get("url")
+                args.submit_secret = args.submit_secret or conf.get("secret")
+            except (ValueError, OSError) as e:
+                log(f"submit.conf unreadable ({e}) — skipping auto-submit")
+    if args.no_submit:
+        args.submit = None
 
     if args.check:
         doctor(assume_yes=args.yes)

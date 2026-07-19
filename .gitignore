@@ -3,3 +3,6 @@ __pycache__/
 # real scan outputs — may contain client network data, never commit
 *.json
 !sample-snapshot.json
+
+# auto-submit config (contains the intake secret)
+submit.conf
