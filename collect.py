@@ -1093,10 +1093,50 @@ def _parse_version(text: str) -> str | None:
 
 
 def check_for_update(assume_yes: bool = False) -> None:
-    """GitHub is the source of truth. Fetch the latest collector version and, if
-    this copy is behind, offer to update before scanning. Never blocks: any
-    failure (offline, timeout, not a git checkout) prints a soft note and lets
-    the scan proceed — field work must never be stopped by an update check."""
+    """GitHub is the source of truth. Before scanning, see whether this copy is
+    behind and offer to update. Never blocks: any failure (offline, not a git
+    checkout) prints a soft note and the scan proceeds — field work must never
+    be stopped by an update check.
+
+    A git checkout is checked with `git fetch` (immediate, not CDN-cached); a
+    loose copy falls back to the raw file over HTTP (best-effort, and raw is
+    cached ~5 min so it can lag a fresh push)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.path.isdir(os.path.join(here, ".git")) and have("git"):
+        _update_via_git(here, assume_yes)
+    else:
+        _update_via_http()
+
+
+def _update_via_git(here: str, assume_yes: bool) -> None:
+    # sudo runs git as root in a user-owned tree → mark it safe to avoid the
+    # "dubious ownership" refusal.
+    gh = ["git", "-c", f"safe.directory={here}", "-C", here]
+    rc, _, err = run(gh + ["fetch", "--quiet", "origin", "main"], 30)
+    if rc != 0:
+        log(f"update check skipped (git fetch: {err.strip()[:60]})")
+        return
+    _, local, _ = run(gh + ["rev-parse", "HEAD"], 10)
+    _, remote, _ = run(gh + ["rev-parse", "origin/main"], 10)
+    if not remote.strip() or local.strip() == remote.strip():
+        log(f"collector up to date (v{COLLECTOR_VERSION})")
+        return
+    _, cnt, _ = run(gh + ["rev-list", "--count", "HEAD..origin/main"], 10)
+    _, remote_src, _ = run(gh + ["show", "origin/main:collect.py"], 15)
+    newv = _parse_version(remote_src) or "newer"
+    print(f"\n\033[33m▲ Update available: v{newv} — you have v{COLLECTOR_VERSION} "
+          f"({cnt.strip() or '?'} commit(s) behind).\033[0m")
+    if not (assume_yes or input("  Pull the update now? [Y/n]: ").strip().lower() in ("", "y", "yes")):
+        return
+    rc, out, err = run(gh + ["pull", "--ff-only", "origin", "main"], 60)
+    if rc != 0:
+        print(f"  git pull failed: {(err or out).strip()}\n  Update manually: git -C {here} pull\n")
+        return
+    print("  Updated. Restarting with the new version…\n")
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+def _update_via_http() -> None:
     try:
         req = urllib.request.Request(REPO_RAW_URL, headers={"User-Agent": "network-snapshot"})
         with urllib.request.urlopen(req, timeout=6) as resp:
@@ -1112,25 +1152,9 @@ def check_for_update(assume_yes: bool = False) -> None:
             return
     except ValueError:
         return
-
     print(f"\n\033[33m▲ Update available: v{remote} (you have v{COLLECTOR_VERSION}).\033[0m")
-    here = os.path.dirname(os.path.abspath(__file__))
-    is_git = os.path.isdir(os.path.join(here, ".git")) and have("git")
-    if not is_git:
-        print(f"  This copy is not a git checkout. Get the latest with:\n"
-              f"    git clone {REPO_WEB_URL}\n"
-              f"  (or download {REPO_RAW_URL})\n")
-        return
-    if not (assume_yes or input("  Pull the update now? [Y/n]: ").strip().lower() in ("", "y", "yes")):
-        return
-    # sudo runs git as root in a user-owned tree → mark it safe to avoid the
-    # "dubious ownership" refusal.
-    rc, out, err = run(["git", "-c", f"safe.directory={here}", "-C", here, "pull", "--ff-only"], 40)
-    if rc != 0:
-        print(f"  git pull failed: {(err or out).strip()}\n  Update manually: git -C {here} pull\n")
-        return
-    print("  Updated. Restarting with the new version…\n")
-    os.execv(sys.executable, [sys.executable, *sys.argv])
+    print(f"  This copy is not a git checkout. Clone the source of truth:\n"
+          f"    git clone {REPO_WEB_URL}\n")
 
 
 def submit(url: str, secret: str | None, snapshot: dict, timeout: int = 60) -> None:
