@@ -1,4 +1,4 @@
 {
-  "url": "https://hub.teqbytes.com/api/network-snapshots/intake",
+  "url": "https://your-app.example.com/network-snapshots/intake",
   "secret": "PUT_THE_SNAPSHOT_INTAKE_SECRET_HERE"
 }

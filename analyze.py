@@ -11,8 +11,8 @@ dict out.
 This model is the seam. The report renderer consumes it to draw HTML, and the
 AI narrative layer consumes the same model (via `build_brief`) to write the
 executive summary and refine the ambiguous ~20%. Keeping the deterministic
-picture separate from both is what lets the report engine move off TEQhub
-later without dragging anything with it.
+picture separate from both is what lets the report engine move to a different
+host later without dragging anything with it.
 
     from analyze import analyze
     model = analyze(json.load(open("snapshot.json")))

@@ -9,7 +9,7 @@ what it found — hosts, open ports/services, LLDP/VLAN topology, and nearby WiF
 
 The snapshot JSON is the whole contract. Everything downstream (categorization,
 the AI narrative, the report) consumes this file and nothing else, so the report
-side can live in TEQhub today and move elsewhere later without touching this.
+side can live in a host app today and move elsewhere later without touching this.
 
 Design notes
 ------------

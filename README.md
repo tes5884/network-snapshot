@@ -6,8 +6,8 @@ so onboarding can be scoped (and priced) from real data instead of a walk-around
 
 The report side (categorization → AI narrative → pretty output) is built
 separately and consumes **only** the JSON described below. That seam is what
-keeps the two halves independent: the report can live in TEQhub today and move
-elsewhere later without touching the collector.
+keeps the two halves independent: the report can live in a host app today and
+move elsewhere later without touching the collector.
 
 ## Source of truth & updates
 
@@ -96,15 +96,15 @@ sudo python3 collect.py --site "Acme Dental" --no-submit    # opt out for one ru
 
 `submit.conf` (gitignored — it holds the secret):
 ```json
-{ "url": "https://hub.teqbytes.com/api/network-snapshots/intake", "secret": "<intake secret>" }
+{ "url": "https://your-app.example.com/network-snapshots/intake", "secret": "<intake secret>" }
 ```
 
-The default target is **TEQhub's intake endpoint** (`POST /network-snapshots/
-intake`, secured with an `x-snapshot-secret` header): it analyzes the snapshot,
-auto-matches it to a company by site label, and files it (unmatched scans land
-"unassigned" for the operator to assign in the UI). The collector doesn't know
-or care where it lands — repoint the URL and it hits anything that speaks the
-same POST.
+The target is an **intake endpoint** (`POST /network-snapshots/intake`, secured
+with an `x-snapshot-secret` header) on whatever app hosts the reports: it
+analyzes the snapshot, auto-matches it to a company by site label, and files it
+(unmatched scans land "unassigned" for the operator to assign in the UI). The
+collector doesn't know or care where it lands — repoint the URL and it hits
+anything that speaks the same POST.
 
 ### What it does
 
@@ -229,15 +229,15 @@ findings, scope — never raw packets or per-host port dumps) that the narrative
 layer reads to write the executive summary, rank significance, and resolve the
 ambiguous devices. Its output comes back as a markdown file fed to `--narrative`;
 with no narrative supplied, a deterministic auto-summary fills the slot so the
-report is always complete. This keeps the AI decoupled — it can run in TEQhub,
-n8n, or anywhere, and the report engine never depends on it. `sample-report.html`
+report is always complete. This keeps the AI decoupled — it can run in a host
+app, n8n, or anywhere, and the report engine never depends on it. `sample-report.html`
 (committed) is an example built from the demo data.
 
 ## Roadmap
 
 - **Now:** collector + JSON contract + report engine (this repo).
 - **Next:** wire the AI narrative pass (brief → executive summary/ranking/
-  scoping) into TEQhub or n8n, and a one-shot `--pdf` via headless Chromium.
+  scoping) into a host app or n8n, and a one-shot `--pdf` via headless Chromium.
 - **Monitor-mode WiFi** (built, untested until the Alfa card arrives): pass
   `--wifi-monitor wlan1` for a passive full-RF survey — per-AP client counts,
   hidden SSIDs, channel congestion — instead of the basic managed scan. Needs a

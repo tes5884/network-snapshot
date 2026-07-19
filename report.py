@@ -40,7 +40,7 @@ except Exception:  # noqa: BLE001 — no tzdata → degrade to UTC rather than c
 
 # ── Palette / design tokens ──────────────────────────────────────────────────
 # A restrained "security assessment" identity of its own — deliberately NOT
-# coupled to TEQhub's design system, since this engine may move off later. Ink
+# coupled to any host app's design system, since this engine may move off later. Ink
 # on paper-white with a single steel-blue accent and semantic severity colors.
 CSS = """
 :root{
