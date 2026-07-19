@@ -160,9 +160,14 @@ section:first-of-type{border-top:0}
 .pill.mid{background:var(--med-bg);color:var(--med)}
 
 .wan-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;text-align:center}
-.wan-cards .wc{border:1px solid var(--line);border-radius:8px;padding:16px}
-.wan-cards .wc .n{font-size:24px;font-weight:700}
-.wan-cards .wc .u{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em}
+.wan-cards .wc{border:1px solid var(--line);border-radius:8px;padding:18px 16px;background:var(--ground)}
+.wan-cards .wc.dn{border-color:#bcd3c4;background:var(--low-bg)}
+.wan-cards .wc .n{font-size:30px;font-weight:700;letter-spacing:-.02em}
+.wan-cards .wc .n .arw{font-size:15px;margin-right:4px;vertical-align:2px}
+.wan-cards .wc.dn .n .arw{color:var(--low)} .wan-cards .wc.up .n .arw{color:var(--accent)}
+.wan-cards .wc.pg .n .arw{color:var(--ink-3)}
+.wan-cards .wc .u{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.wan-cap{margin-top:11px;font-size:12px;color:var(--ink-3);text-align:center}
 
 .foot{padding:22px 48px 34px;color:var(--ink-3);font-size:11.5px;line-height:1.6;
   border-top:1px solid var(--line)}
@@ -364,8 +369,8 @@ def render(model, narrative_md=None):
         ("", str(model["host_count"]), "Devices found"),
         ("sev-high" if n_high else "", str(n_high), "High-risk flags"),
         ("sev-med" if n_med else "", str(n_med), "Medium flags"),
-        ("", (f'{wan.get("download_mbps"):.0f}▾' if wan.get("download_mbps") else str(len([c for c in cc]))),
-         "Down Mbps" if wan.get("download_mbps") else "Device types"),
+        ("", (f'{wan.get("download_mbps"):.0f}' if wan.get("download_mbps") is not None else str(len(cc))),
+         "Mbps down" if wan.get("download_mbps") is not None else "Device types"),
     ]
     P.append('<div class="kpis">' + "".join(
         f'<div class="kpi {c}"><div class="n mono">{esc(v)}</div><div class="l">{esc(l)}</div></div>'
@@ -467,16 +472,27 @@ def render(model, narrative_md=None):
                      f'<td>{pill}</td><td class="num">{esc(sig)+"%" if sig is not None else "—"}</td></tr>')
         P.append('</table></div></section>')
 
-    # ── 06 WAN ──
+    # ── 06 WAN / speed test ──
     if wan.get("download_mbps") is not None:
+        server = wan.get("server")
+        hint = " · ".join(x for x in [wan.get("isp"), server] if x)
         P.append('<section><div class="pad">')
-        P.append(head("Internet Circuit", esc(wan.get("isp") or "")))
+        P.append(head("Internet Circuit", esc(hint) + (" — WAN speed test" if hint else "measured WAN speed test")))
         P.append('<div class="wan-cards">')
-        for n, u in [(f'{wan.get("download_mbps"):.0f}', "Mbps down"),
-                     (f'{wan.get("upload_mbps"):.0f}' if wan.get("upload_mbps") else "—", "Mbps up"),
-                     (f'{wan.get("ping_ms"):.0f}' if wan.get("ping_ms") else "—", "ms ping")]:
-            P.append(f'<div class="wc"><div class="n mono">{esc(n)}</div><div class="u">{esc(u)}</div></div>')
-        P.append('</div></div></section>')
+        cards = [
+            ("dn", "▼", f'{wan.get("download_mbps"):.0f}', "Mbps download"),
+            ("up", "▲", f'{wan.get("upload_mbps"):.0f}' if wan.get("upload_mbps") is not None else "—", "Mbps upload"),
+            ("pg", "•", f'{wan.get("ping_ms"):.0f}' if wan.get("ping_ms") is not None else "—", "ms latency"),
+        ]
+        for cls, arw, n, u in cards:
+            P.append(f'<div class="wc {cls}"><div class="n mono"><span class="arw">{arw}</span>{esc(n)}</div>'
+                     f'<div class="u">{esc(u)}</div></div>')
+        P.append('</div>')
+        if wan.get("isp") or server:
+            P.append(f'<div class="wan-cap">Measured live during the scan'
+                     + (f' against {esc(server)}' if server else "")
+                     + (f' via {esc(wan.get("isp"))}' if wan.get("isp") else "") + '.</div>')
+        P.append('</div></section>')
 
     # ── 07 Onboarding scope ──
     if model["scope"]:
