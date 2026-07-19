@@ -36,6 +36,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -82,6 +83,64 @@ def run(cmd: list[str], timeout: int) -> tuple[int, str, str]:
         return -1, e.stdout or "", "timeout"
     except Exception as e:  # noqa: BLE001
         return -1, "", str(e)
+
+
+# ── Tool preflight ───────────────────────────────────────────────────────────
+# (binary, apt package, what it's for, required?)
+TOOLS = [
+    ("ip", "iproute2", "interface & route detection", True),
+    ("nmap", "nmap", "host / service / OS discovery", True),
+    ("arp-scan", "arp-scan", "fast layer-2 host + MAC sweep", True),
+    ("tcpdump", "tcpdump", "LLDP capture + passive sniff", True),
+    ("avahi-browse", "avahi-utils", "mDNS service discovery", False),
+    ("lldpctl", "lldpd", "LLDP neighbor table (switch / VLAN)", False),
+    ("snmpwalk", "snmp", "SNMP topology (switch links, router id)", False),
+    ("nmcli", "network-manager", "WiFi scan (managed mode)", False),
+    ("iw", "iw", "WiFi info / monitor-mode fallback", False),
+    ("airodump-ng", "aircrack-ng", "monitor-mode WiFi survey", False),
+]
+
+
+def doctor(assume_yes: bool = False) -> bool:
+    """Report which tools are present, offer to apt-install the missing ones.
+    Returns True if it's OK to proceed (all *required* tools available)."""
+    missing = [(b, pkg, why, req) for (b, pkg, why, req) in TOOLS if not have(b)]
+    print("Tool check:", file=sys.stderr)
+    for (b, pkg, why, req) in TOOLS:
+        mark = "✓" if have(b) else ("✗ REQUIRED" if req else "○ optional")
+        print(f"  {mark:12} {b:14} — {why}", file=sys.stderr)
+    if not missing:
+        print("All tools present.\n", file=sys.stderr)
+        return True
+
+    pkgs = sorted({pkg for (_, pkg, _, _) in missing})
+    req_missing = [b for (b, _, _, r) in missing if r]
+    if not have("apt-get"):
+        print(f"\nMissing: {', '.join(b for b,_,_,_ in missing)}. Install manually "
+              f"(this isn't an apt system): {' '.join(pkgs)}\n", file=sys.stderr)
+        return not req_missing
+
+    cmd = (["sudo"] if hasattr(os, "geteuid") and os.geteuid() != 0 else []) + ["apt-get", "install", "-y"] + pkgs
+    print(f"\nMissing {len(missing)} tool(s). Install with:\n  {shlex.join(cmd)}", file=sys.stderr)
+    do = assume_yes
+    if not assume_yes:
+        try:
+            do = input("Install now? [Y/n] ").strip().lower() in ("", "y", "yes")
+        except EOFError:
+            do = False
+    if do:
+        run_i = subprocess.run(["sudo", "apt-get", "update"] if os.geteuid() != 0 else ["apt-get", "update"])
+        subprocess.run(cmd)
+        still = [b for (b, _, _, r) in missing if not have(b) and r]
+        if still:
+            print(f"\nStill missing required: {', '.join(still)} — scan will be limited.\n", file=sys.stderr)
+        else:
+            print("Install complete.\n", file=sys.stderr)
+            return True
+    if req_missing:
+        print(f"\n⚠ Proceeding without required tool(s) {', '.join(req_missing)} — "
+              "the snapshot will be thin.\n", file=sys.stderr)
+    return True
 
 
 # ── Interface / local network ────────────────────────────────────────────────
@@ -813,11 +872,20 @@ def main() -> int:
     ap.add_argument("--listen", type=int, default=20, help="seconds for passive listeners")
     ap.add_argument("--nmap-timeout", type=int, default=1800, help="hard cap on nmap (s)")
     ap.add_argument("--demo", action="store_true", help="emit a sample snapshot, no network")
+    ap.add_argument("--check", action="store_true", help="check for required tools (offer to install) and exit")
+    ap.add_argument("--yes", action="store_true", help="auto-install missing tools without prompting")
+    ap.add_argument("--skip-check", action="store_true", help="skip the tool preflight before scanning")
     ap.add_argument("--submit", default=os.environ.get("SNAPSHOT_SUBMIT_URL"),
                     help="POST the snapshot to this webhook after scanning (or set SNAPSHOT_SUBMIT_URL)")
     ap.add_argument("--submit-secret", default=os.environ.get("SNAPSHOT_SUBMIT_SECRET"),
                     help="shared secret sent as x-snapshot-secret (or set SNAPSHOT_SUBMIT_SECRET)")
     args = ap.parse_args()
+
+    if args.check:
+        doctor(assume_yes=args.yes)
+        return 0
+    if not args.demo and not args.skip_check:
+        doctor(assume_yes=args.yes)
 
     snapshot = demo_snapshot() if args.demo else collect(args)
     text = json.dumps(snapshot, indent=2)

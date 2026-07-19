@@ -23,6 +23,13 @@ sudo apt install nmap arp-scan tcpdump avahi-utils network-manager lldpd snmp ai
 `lldpd` is optional but makes VLAN/switch discovery much better (it keeps an
 LLDP neighbor table instead of us sniffing a few frames).
 
+Or just let the collector check for you and install what's missing:
+```bash
+sudo python3 collect.py --check      # report + offer to apt-install missing tools
+```
+The preflight also runs automatically before every scan (skip with `--skip-check`,
+auto-install with `--yes`).
+
 ### Run — the easy way (TUI)
 
 Don't want to remember flags? Launch the terminal UI, fill in the fields, hit
