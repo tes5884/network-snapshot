@@ -56,6 +56,24 @@ python3 collect.py --demo -o sample-snapshot.json
 Useful flags: `--iface eth0` (force interface), `--no-wifi`, `--listen 30`
 (seconds for passive listeners), `--nmap-timeout 1800`.
 
+### Auto-submit (optional)
+
+After scanning, the collector can POST the snapshot to a webhook — the local
+file is always written first, so a failed upload never loses a scan.
+
+```bash
+sudo python3 collect.py --site "Acme Dental" \
+  --submit "https://n8n.tspitz.com/webhook/network-snapshot" \
+  --submit-secret "<secret>"
+# or set SNAPSHOT_SUBMIT_URL / SNAPSHOT_SUBMIT_SECRET in the environment
+```
+
+The endpoint is an n8n workflow (**Network Snapshot Intake**, secured with an
+`x-snapshot-secret` header). For now it posts a summary + the JSON file to
+Slack; the destination is one node, easy to repoint (Nextcloud, a TEQhub
+endpoint, a data table) when the report engine is ready. The collector doesn't
+know or care where it lands — it just hits the webhook.
+
 ### What it does
 
 | Step | Tool | Mode | Gives |

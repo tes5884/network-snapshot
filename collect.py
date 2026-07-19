@@ -34,12 +34,14 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import re
 import shutil
 import socket
 import subprocess
 import sys
 import time
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
@@ -509,6 +511,21 @@ def demo_snapshot() -> dict:
     }
 
 
+def submit(url: str, secret: str | None, snapshot: dict, timeout: int = 60) -> None:
+    """POST the snapshot to a collection webhook (n8n). Best-effort: the local
+    file is always written first, so a failed upload never loses a scan."""
+    body = json.dumps(snapshot).encode()
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    if secret:
+        req.add_header("x-snapshot-secret", secret)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            log(f"submitted → {url}  (HTTP {resp.status})")
+    except Exception as e:  # noqa: BLE001
+        log(f"submit FAILED ({e}) — local file is still saved, upload later")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Network Snapshot collector")
     ap.add_argument("-o", "--output", help="write snapshot JSON here (default: stdout)")
@@ -521,16 +538,24 @@ def main() -> int:
     ap.add_argument("--listen", type=int, default=20, help="seconds for passive listeners")
     ap.add_argument("--nmap-timeout", type=int, default=1800, help="hard cap on nmap (s)")
     ap.add_argument("--demo", action="store_true", help="emit a sample snapshot, no network")
+    ap.add_argument("--submit", default=os.environ.get("SNAPSHOT_SUBMIT_URL"),
+                    help="POST the snapshot to this webhook after scanning (or set SNAPSHOT_SUBMIT_URL)")
+    ap.add_argument("--submit-secret", default=os.environ.get("SNAPSHOT_SUBMIT_SECRET"),
+                    help="shared secret sent as x-snapshot-secret (or set SNAPSHOT_SUBMIT_SECRET)")
     args = ap.parse_args()
 
     snapshot = demo_snapshot() if args.demo else collect(args)
     text = json.dumps(snapshot, indent=2)
-    if args.output:
-        with open(args.output, "w") as f:
+    # Always write the local file first — it's the safety net.
+    out = args.output or (f"snapshot-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json" if args.submit else None)
+    if out:
+        with open(out, "w") as f:
             f.write(text)
-        log(f"wrote {args.output}  ({len(snapshot['hosts'])} hosts)")
-    else:
+        log(f"wrote {out}  ({len(snapshot['hosts'])} hosts)")
+    elif not args.submit:
         print(text)
+    if args.submit:
+        submit(args.submit, args.submit_secret, snapshot)
     return 0
 
 
