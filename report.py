@@ -375,8 +375,8 @@ def render(model, narrative_md=None):
         ("", str(model["host_count"]), "Devices found"),
         ("sev-high" if n_high else "", str(n_high), "High-risk flags"),
         ("sev-med" if n_med else "", str(n_med), "Medium flags"),
-        ("", (f'{wan.get("download_mbps"):.0f}' if wan.get("download_mbps") is not None else str(len(cc))),
-         "Mbps down" if wan.get("download_mbps") is not None else "Device types"),
+        ("", (f'{wan.get("download_mbps"):.0f}' if wan.get("download_mbps") else str(len(cc))),
+         "Mbps down" if wan.get("download_mbps") else "Device types"),
     ]
     P.append('<div class="kpis">' + "".join(
         f'<div class="kpi {c}"><div class="n mono">{esc(v)}</div><div class="l">{esc(l)}</div></div>'
@@ -479,7 +479,9 @@ def render(model, narrative_md=None):
         P.append('</table></div></section>')
 
     # ── 06 WAN — public IP (always, when reachable) + speed test (opt-in) ──
-    has_speed = wan.get("download_mbps") is not None
+    # A 0 Mbps download means the speed test failed, not a real circuit — treat
+    # it as "not measured" so the report never shows a misleading zero.
+    has_speed = bool(wan.get("download_mbps"))
     if wan.get("public_ip") or has_speed:
         server = wan.get("server")
         hint = " · ".join(x for x in [wan.get("isp"), wan.get("geo")] if x)

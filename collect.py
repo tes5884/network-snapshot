@@ -625,18 +625,22 @@ def speed_test() -> dict | None:
     except (ValueError, IndexError):
         return None
     if tool == "speedtest-cli":
-        return {"download_mbps": round(d.get("download", 0) / 1e6, 1),
-                "upload_mbps": round(d.get("upload", 0) / 1e6, 1),
-                "ping_ms": round(d.get("ping", 0), 1),
-                "isp": (d.get("client") or {}).get("isp"),
-                "public_ip": (d.get("client") or {}).get("ip"),
-                "server": (d.get("server") or {}).get("sponsor")}
-    return {"download_mbps": round(d.get("download", {}).get("bandwidth", 0) * 8 / 1e6, 1),
-            "upload_mbps": round(d.get("upload", {}).get("bandwidth", 0) * 8 / 1e6, 1),
-            "ping_ms": round(d.get("ping", {}).get("latency", 0), 1),
-            "isp": d.get("isp"),
-            "public_ip": (d.get("interface") or {}).get("externalIp"),
-            "server": (d.get("server") or {}).get("name")}
+        res = {"download_mbps": round(d.get("download", 0) / 1e6, 1),
+               "upload_mbps": round(d.get("upload", 0) / 1e6, 1),
+               "ping_ms": round(d.get("ping", 0), 1),
+               "isp": (d.get("client") or {}).get("isp"),
+               "public_ip": (d.get("client") or {}).get("ip"),
+               "server": (d.get("server") or {}).get("sponsor")}
+    else:
+        res = {"download_mbps": round(d.get("download", {}).get("bandwidth", 0) * 8 / 1e6, 1),
+               "upload_mbps": round(d.get("upload", {}).get("bandwidth", 0) * 8 / 1e6, 1),
+               "ping_ms": round(d.get("ping", {}).get("latency", 0), 1),
+               "isp": d.get("isp"),
+               "public_ip": (d.get("interface") or {}).get("externalIp"),
+               "server": (d.get("server") or {}).get("name")}
+    # A 0 download is a failed measurement, not a real result — report it as a
+    # failed step so the WAN block stays clean (public_ip() still fills the IP).
+    return res if res["download_mbps"] else None
 
 
 def public_ip() -> dict | None:
