@@ -173,12 +173,45 @@ over the aggregate.
 `sample-snapshot.json` (committed, also produced by `--demo`) is a realistic
 example to develop the report against with no live network.
 
+## Report engine
+
+Two files, still stdlib-only, that consume the JSON above and nothing else:
+
+- **`analyze.py`** — the deterministic engine (~80%). Snapshot in, structured
+  *findings model* out: each host categorized (firewall / switch / AP / server /
+  NAS / hypervisor / workstation / camera / printer / VoIP / mobile / IoT /
+  unclassified) by cross-referencing OUI vendor + open ports + mDNS services +
+  SNMP role, each with a confidence (`low` = the ambiguous ~20% for the AI to
+  refine). It ranks risk/opportunity flags (flat network, anonymous SMB shares,
+  open/weak WiFi, AXFR, telnet, default SNMP community, EOL OS, exposed RDP…)
+  and builds an onboarding-scope worksheet (count → managed-service line). Hosts
+  seen on two IPs (laptop on dongle + WiFi) are deduped by hostname.
+- **`report.py`** — renders that model into a **self-contained, print-to-PDF
+  HTML report**: masthead, KPI band, ranked findings with severity chips and
+  onboarding implications, device inventory grouped by category, an SNMP/LLDP
+  topology diagram, wireless survey, WAN circuit, and the scope worksheet.
+
+```bash
+python3 report.py acme.json -o acme-report.html          # deterministic report
+python3 report.py acme.json --brief brief.json           # emit the AI-input JSON only
+python3 report.py acme.json -o acme-report.html \
+        --narrative summary.md                           # drop in an AI exec summary
+```
+
+The **AI seam** is `build_brief()`: a compact, privacy-safe summary (categories,
+findings, scope — never raw packets or per-host port dumps) that the narrative
+layer reads to write the executive summary, rank significance, and resolve the
+ambiguous devices. Its output comes back as a markdown file fed to `--narrative`;
+with no narrative supplied, a deterministic auto-summary fills the slot so the
+report is always complete. This keeps the AI decoupled — it can run in TEQhub,
+n8n, or anywhere, and the report engine never depends on it. `sample-report.html`
+(committed) is an example built from the demo data.
+
 ## Roadmap
 
-- **Now:** collector + JSON contract (this repo).
-- **Next:** report engine — deterministic categorization + risk flags, then an
-  AI pass for the executive narrative, significance ranking, and onboarding
-  scoping. Rendered as a styled HTML/PDF, attachable to a TEQhub proposal.
+- **Now:** collector + JSON contract + report engine (this repo).
+- **Next:** wire the AI narrative pass (brief → executive summary/ranking/
+  scoping) into TEQhub or n8n, and a one-shot `--pdf` via headless Chromium.
 - **Monitor-mode WiFi** (built, untested until the Alfa card arrives): pass
   `--wifi-monitor wlan1` for a passive full-RF survey — per-AP client counts,
   hidden SSIDs, channel congestion — instead of the basic managed scan. Needs a
