@@ -18,7 +18,7 @@ tools and parses their output with the stdlib (Python 3.9+, no `pip install`).
 
 Debian/Ubuntu:
 ```bash
-sudo apt install nmap arp-scan tcpdump avahi-utils network-manager lldpd
+sudo apt install nmap arp-scan tcpdump avahi-utils network-manager lldpd snmp aircrack-ng
 ```
 `lldpd` is optional but makes VLAN/switch discovery much better (it keeps an
 LLDP neighbor table instead of us sniffing a few frames).
@@ -173,9 +173,14 @@ example to develop the report against with no live network.
   hidden SSIDs, channel congestion — instead of the basic managed scan. Needs a
   monitor-capable adapter (Alfa AWUS036ACH/ACM) on native Linux. Passive only;
   never injects.
-- **SNMP topology** (planned): walk switch/router SNMP (LLDP-MIB, BRIDGE-MIB,
-  IF-MIB) to reconstruct the physical diagram — which switch links where, what
-  is on each port, the router/firewall. Gated on SNMP access (community string
-  or client-provided read-only creds).
+- **SNMP topology** (built): always runs — walks the gateway + any SNMP-
+  responsive network gear (LLDP-MIB neighbor table, IF-MIB, system identity) to
+  reconstruct the diagram: `network.gateway` (router/firewall identity),
+  `network.snmp_devices[]` (each switch/AP with its LLDP neighbors + port), and
+  `network.topology_edges[]` (the adjacency the report renders as a graph).
+  Read-only; tries `--snmp-community` (default `public`). No SNMP response →
+  empty topology, everything else still collected. The full cable-level map
+  needs SNMP on the switches — passive-only yields just the gateway + immediate
+  LLDP neighbor.
 - **Later:** Raspberry Pi drop-box image + phone-home upload, so it can be left
   running and collected remotely.

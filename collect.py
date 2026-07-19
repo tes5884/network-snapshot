@@ -312,6 +312,121 @@ def passive_sniff(iface: str, seconds: int) -> dict[str, dict]:
     return hosts
 
 
+# ── SNMP topology (switches/router → who links where, what's on each port) ───
+# The physical-diagram source. Walks standard MIBs by numeric OID (no MIB files
+# needed): system identity, the LLDP remote-neighbor table (switch↔switch↔AP
+# links), and interfaces. Tries community strings against the gateway + any
+# SNMP-responsive gear. Read-only; all scans are done with customer consent.
+
+_SNMP = {
+    "sys_descr": "1.3.6.1.2.1.1.1.0",
+    "sys_name": "1.3.6.1.2.1.1.5.0",
+    "lldp_rem_sysname": "1.0.8802.1.1.2.1.4.1.1.9",
+    "lldp_rem_portid": "1.0.8802.1.1.2.1.4.1.1.7",
+    "lldp_rem_portdesc": "1.0.8802.1.1.2.1.4.1.1.8",
+    "if_name": "1.3.6.1.2.1.31.1.1.1.1",
+    "if_oper": "1.3.6.1.2.1.2.2.1.8",
+}
+
+
+def _snmp_role(descr: str) -> str:
+    d = (descr or "").lower()
+    if re.search(r"firewall|fortigate|sonicwall|palo alto|pfsense|edgerouter|mikrotik|\budm\b|\busg\b|router", d):
+        return "router/firewall"
+    if re.search(r"switch|catalyst|procurve|nexus|aruba|unifi.*switch", d):
+        return "switch"
+    if re.search(r"access point|\buap\b|wireless", d):
+        return "access-point"
+    return "snmp-device"
+
+
+def parse_snmp_walk(text: str) -> list[tuple[str, str]]:
+    """snmpwalk -Oqn output → [(numeric_oid, value)]. Pure/ testable."""
+    out = []
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln.startswith("."):
+            continue
+        oid, _, val = ln.partition(" ")
+        val = val.strip().strip('"')
+        if val and "No Such" not in val and val != "":
+            out.append((oid, val))
+    return out
+
+
+def _snmp_walk(ip: str, community: str, base: str, timeout: int = 15) -> list[tuple[str, str]]:
+    tool = "snmpbulkwalk" if have("snmpbulkwalk") else "snmpwalk"
+    rc, out, _ = run([tool, "-v2c", "-c", community, "-Oqn", "-t", "2", "-r", "1", ip, base], timeout)
+    return parse_snmp_walk(out) if out else []
+
+
+def _suffix_map(rows: list[tuple[str, str]], base: str) -> dict[str, str]:
+    """Map each row's OID index (the part after `base`) → value. Normalizes the
+    leading dot snmpwalk emits so the slice lines up regardless."""
+    m: dict[str, str] = {}
+    for oid, v in rows:
+        o = oid.lstrip(".")
+        if o.startswith(base):
+            m[o[len(base):]] = v
+    return m
+
+
+def _lldp_neighbors(ip: str, community: str) -> list[dict]:
+    """Correlate the LLDP remote-table columns by their shared OID index →
+    each neighbor's name + port as seen from this device."""
+    names = _suffix_map(_snmp_walk(ip, community, _SNMP["lldp_rem_sysname"]), _SNMP["lldp_rem_sysname"])
+    portids = _suffix_map(_snmp_walk(ip, community, _SNMP["lldp_rem_portid"]), _SNMP["lldp_rem_portid"])
+    portdescs = _suffix_map(_snmp_walk(ip, community, _SNMP["lldp_rem_portdesc"]), _SNMP["lldp_rem_portdesc"])
+    neighbors = []
+    for idx, name in names.items():
+        parts = idx.strip(".").split(".")
+        local_port = parts[1] if len(parts) > 1 else None  # lldpRemLocalPortNum
+        neighbors.append({
+            "local_port": local_port,
+            "neighbor_name": name,
+            "neighbor_port": portdescs.get(idx) or portids.get(idx),
+        })
+    return neighbors
+
+
+def snmp_topology(targets: list[str], communities: list[str]) -> dict:
+    if not (have("snmpwalk") or have("snmpbulkwalk")):
+        return {"devices": [], "edges": []}
+    devices, edges = [], []
+    for ip in targets[:20]:  # bound the sweep
+        descr = name = None
+        used = None
+        for community in communities:
+            rc, out, _ = run(["snmpget", "-v2c", "-c", community, "-Oqv", "-t", "2", "-r", "1", ip, _SNMP["sys_descr"]], 8)
+            if rc == 0 and out.strip() and "No Such" not in out and "Timeout" not in out:
+                descr = out.strip().strip('"')
+                used = community
+                break
+        if not used:
+            continue  # no SNMP here
+        nm = _snmp_walk(ip, used, _SNMP["sys_name"])
+        name = nm[0][1] if nm else None
+        neighbors = _lldp_neighbors(ip, used)
+        ifs = _snmp_walk(ip, used, _SNMP["if_name"])
+        oper = dict(_snmp_walk(ip, used, _SNMP["if_oper"]))
+        up = sum(1 for oid, v in oper.items() if v.strip() in ("1", "up"))
+        devices.append({
+            "ip": ip,
+            "sysname": name,
+            "sysdescr": descr,
+            "role_guess": _snmp_role(descr),
+            "neighbor_count": len(neighbors),
+            "neighbors": neighbors,
+            "interfaces": len(ifs),
+            "interfaces_up": up,
+            "community_used": used,
+        })
+        for nb in neighbors:
+            edges.append({"from": name or ip, "from_port": nb["local_port"],
+                          "to": nb["neighbor_name"], "to_port": nb["neighbor_port"]})
+    return {"devices": devices, "edges": edges}
+
+
 # ── WiFi scan ────────────────────────────────────────────────────────────────
 
 def scan_wifi() -> list[dict]:
@@ -526,6 +641,36 @@ def collect(args) -> dict:
     hosts = merge_hosts(arp, nmap, passive_hosts)
     attach_mdns(hosts, mdns)
 
+    # SNMP topology — target the gateway + anything that looks like network gear
+    # or exposed 161. Always runs (all scans are with customer consent).
+    gw = iface_info.get("gateway")
+    NETGEAR = re.compile(r"ubiquiti|cisco|aruba|netgear|mikrotik|fortinet|meraki|juniper|hpe?\b|hewlett|sonicwall|palo alto|extreme", re.I)
+    snmp_targets = []
+    if gw:
+        snmp_targets.append(gw)
+    for h in hosts:
+        ip = h["ipv4"]
+        if ip in snmp_targets:
+            continue
+        if any(p.get("port") == 161 for p in h.get("open_ports", [])) or NETGEAR.search(h.get("vendor") or ""):
+            snmp_targets.append(ip)
+    communities = [c.strip() for c in (args.snmp_community or "public").split(",") if c.strip()]
+    log(f"SNMP topology ({len(snmp_targets)} target(s), communities {communities})…")
+    snmp = step("snmp", lambda: snmp_topology(snmp_targets, communities)) or {"devices": [], "edges": []}
+
+    # Gateway / firewall identity — combine host record + any SNMP identity.
+    gw_host = next((h for h in hosts if h["ipv4"] == gw), None)
+    gw_snmp = next((d for d in snmp["devices"] if d["ip"] == gw), None)
+    gateway = None
+    if gw:
+        titles = [p.get("title") for p in (gw_host or {}).get("open_ports", []) if p.get("title")]
+        gateway = {
+            "ipv4": gw,
+            "vendor": (gw_host or {}).get("vendor"),
+            "identity": (gw_snmp or {}).get("sysdescr") or (titles[0] if titles else None),
+            "role_guess": (gw_snmp or {}).get("role_guess") or "router/firewall",
+        }
+
     subnets = sorted({str(ipaddress.ip_network(f"{h['ipv4']}/24", strict=False)) for h in hosts})
     vlans = sorted({n["vlan"] for n in lldp if n.get("vlan")})
 
@@ -551,13 +696,16 @@ def collect(args) -> dict:
             "interface": iface_info,
             "coverage_note": coverage,
             "steps": steps,
-            "tools_present": {t: have(t) for t in ("nmap", "arp-scan", "tcpdump", "avahi-browse", "lldpctl", "nmcli")},
+            "tools_present": {t: have(t) for t in ("nmap", "arp-scan", "tcpdump", "avahi-browse", "lldpctl", "nmcli", "snmpwalk")},
         },
         "hosts": hosts,
         "network": {
             "subnets_seen": subnets,
             "vlans_seen": [{"id": v, "source": "lldp"} for v in vlans],
             "lldp_neighbors": lldp,
+            "gateway": gateway,
+            "snmp_devices": snmp["devices"],
+            "topology_edges": snmp["edges"],
         },
         "wifi": wifi,
     }
@@ -606,7 +754,24 @@ def demo_snapshot() -> dict:
         "network": {
             "subnets_seen": ["10.0.0.0/24"],
             "vlans_seen": [],
-            "lldp_neighbors": [{"local_port": "eth0", "switch_name": None, "switch_port": None, "vlan": None, "source": "tcpdump"}],
+            "lldp_neighbors": [{"local_port": "eth0", "switch_name": "SW-CORE", "switch_port": "Gi1/0/1", "vlan": None, "source": "lldpd"}],
+            "gateway": {"ipv4": "10.0.0.1", "vendor": "Ubiquiti Inc", "identity": "UniFi Dream Machine Pro", "role_guess": "router/firewall"},
+            "snmp_devices": [
+                {"ip": "10.0.0.2", "sysname": "SW-CORE", "sysdescr": "UniFi Switch 48 PoE", "role_guess": "switch",
+                 "neighbor_count": 2, "neighbors": [
+                     {"local_port": "1", "neighbor_name": "UDM-Pro", "neighbor_port": "Port 9"},
+                     {"local_port": "24", "neighbor_name": "SW-FLOOR2", "neighbor_port": "Gi1/0/48"}],
+                 "interfaces": 52, "interfaces_up": 19, "community_used": "public"},
+                {"ip": "10.0.0.3", "sysname": "SW-FLOOR2", "sysdescr": "UniFi Switch 24", "role_guess": "switch",
+                 "neighbor_count": 1, "neighbors": [
+                     {"local_port": "48", "neighbor_name": "SW-CORE", "neighbor_port": "Port 24"}],
+                 "interfaces": 26, "interfaces_up": 11, "community_used": "public"},
+            ],
+            "topology_edges": [
+                {"from": "SW-CORE", "from_port": "1", "to": "UDM-Pro", "to_port": "Port 9"},
+                {"from": "SW-CORE", "from_port": "24", "to": "SW-FLOOR2", "to_port": "Gi1/0/48"},
+                {"from": "SW-FLOOR2", "from_port": "48", "to": "SW-CORE", "to_port": "Port 24"},
+            ],
         },
         "wifi": [
             {"ssid": "Acme-Corp", "channel": 36, "band": "5GHz", "security": "WPA2", "signal": 82},
@@ -643,6 +808,8 @@ def main() -> int:
     ap.add_argument("--wifi-monitor", default=None, metavar="IFACE",
                     help="monitor-capable adapter (e.g. wlan1) for a richer passive survey — client counts, hidden SSIDs, channel use (needs airodump-ng)")
     ap.add_argument("--wifi-seconds", type=int, default=45, help="monitor-mode capture duration")
+    ap.add_argument("--snmp-community", default="public",
+                    help="comma-separated SNMP read communities to try for topology (default: public)")
     ap.add_argument("--listen", type=int, default=20, help="seconds for passive listeners")
     ap.add_argument("--nmap-timeout", type=int, default=1800, help="hard cap on nmap (s)")
     ap.add_argument("--demo", action="store_true", help="emit a sample snapshot, no network")

@@ -279,10 +279,77 @@
     "lldp_neighbors": [
       {
         "local_port": "eth0",
-        "switch_name": null,
-        "switch_port": null,
+        "switch_name": "SW-CORE",
+        "switch_port": "Gi1/0/1",
         "vlan": null,
-        "source": "tcpdump"
+        "source": "lldpd"
+      }
+    ],
+    "gateway": {
+      "ipv4": "10.0.0.1",
+      "vendor": "Ubiquiti Inc",
+      "identity": "UniFi Dream Machine Pro",
+      "role_guess": "router/firewall"
+    },
+    "snmp_devices": [
+      {
+        "ip": "10.0.0.2",
+        "sysname": "SW-CORE",
+        "sysdescr": "UniFi Switch 48 PoE",
+        "role_guess": "switch",
+        "neighbor_count": 2,
+        "neighbors": [
+          {
+            "local_port": "1",
+            "neighbor_name": "UDM-Pro",
+            "neighbor_port": "Port 9"
+          },
+          {
+            "local_port": "24",
+            "neighbor_name": "SW-FLOOR2",
+            "neighbor_port": "Gi1/0/48"
+          }
+        ],
+        "interfaces": 52,
+        "interfaces_up": 19,
+        "community_used": "public"
+      },
+      {
+        "ip": "10.0.0.3",
+        "sysname": "SW-FLOOR2",
+        "sysdescr": "UniFi Switch 24",
+        "role_guess": "switch",
+        "neighbor_count": 1,
+        "neighbors": [
+          {
+            "local_port": "48",
+            "neighbor_name": "SW-CORE",
+            "neighbor_port": "Port 24"
+          }
+        ],
+        "interfaces": 26,
+        "interfaces_up": 11,
+        "community_used": "public"
+      }
+    ],
+    "topology_edges": [
+      {
+        "from": "SW-CORE",
+        "from_port": "1",
+        "to": "UDM-Pro",
+        "to_port": "Port 9"
+      },
+      {
+        "from": "SW-CORE",
+        "from_port": "24",
+        "to": "SW-FLOOR2",
+        "to_port": "Gi1/0/48"
+      },
+      {
+        "from": "SW-FLOOR2",
+        "from_port": "48",
+        "to": "SW-CORE",
+        "to_port": "Port 24"
       }
     ]
   },
