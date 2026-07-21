@@ -33,6 +33,7 @@ COLLECT = HERE / "collect.py"
 
 HEARTBEAT_EVERY = 20      # seconds
 IDLE_POLL = 5             # seconds between job polls when idle
+UPDATE_EVERY = 1800       # seconds between idle self-update checks (git pull)
 
 
 def log(msg):
@@ -67,6 +68,28 @@ def _req(conf, ident, method, path, body=None, headers=None, timeout=120):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         txt = r.read().decode()
         return r.status, (json.loads(txt) if txt else {})
+
+
+def self_update():
+    """Keep the Pi current: git-pull the repo, install any newly-needed tools,
+    and restart if the code changed. Called on startup and periodically while
+    idle so a field Pi always runs the latest checks without a visit."""
+    here = str(HERE)
+    if not os.path.isdir(os.path.join(here, ".git")):
+        return
+    try:
+        r = subprocess.run(["git", "-c", f"safe.directory={here}", "-C", here, "pull", "--ff-only"],
+                           capture_output=True, text=True, timeout=60)
+    except Exception as e:  # noqa: BLE001
+        log(f"self-update skipped: {e}")
+        return
+    if r.returncode == 0 and "Already up to date" not in (r.stdout or ""):
+        log("collector updated — installing any new tools, restarting")
+        try:
+            subprocess.run([sys.executable, str(COLLECT), "--check", "--yes"], timeout=600)
+        except Exception:  # noqa: BLE001
+            pass
+        os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 def net_info():
@@ -196,6 +219,8 @@ def main():
     conf = load_conf()
     ident = identity()
     once = "--once" in sys.argv  # test mode: enroll + heartbeat + poll once, then exit
+    if not once:
+        self_update()  # pull latest collector + tools before we start (re-execs if changed)
     log(f"agent up as {ident['device_id']} → {conf['teqhub_url']}")
     enroll(conf, ident)
 
@@ -207,7 +232,11 @@ def main():
         return
 
     last_hb = 0.0
+    last_pull = time.time()
     while True:
+        if time.time() - last_pull > UPDATE_EVERY:  # idle self-update; re-execs if changed
+            self_update()
+            last_pull = time.time()
         if time.time() - last_hb > HEARTBEAT_EVERY:
             heartbeat(conf, ident)
             last_hb = time.time()
