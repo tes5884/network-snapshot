@@ -583,7 +583,43 @@ def render(model, narrative_md=None):
                      f'<td><code>{esc(bssid) if bssid else "—"}</code></td>'
                      f'<td>{esc(w.get("band") or "")} · ch {esc(w.get("channel"))}</td>'
                      f'<td>{pill}</td>{clients_td}<td class="num">{sig_txt}</td></tr>')
-        P.append('</table></div></section>')
+        P.append('</table>')
+
+        # Channel usage / RF congestion — how many APs share each channel. In
+        # 2.4 GHz only 1/6/11 don't overlap, so anything else (or a crowded
+        # channel) is congestion. Neighbouring APs count — that's the real air.
+        ch24: dict[int, int] = {}
+        ch5: dict[int, int] = {}
+        for w in wifi:
+            ch = w.get("channel")
+            if not isinstance(ch, int):
+                continue
+            (ch24 if ch <= 14 else ch5)[ch] = (ch24 if ch <= 14 else ch5).get(ch, 0) + 1
+        if ch24 or ch5:
+            def _bars(counts, overlap_ok=None):
+                out = []
+                for c in sorted(counts):
+                    n = counts[c]
+                    warn = overlap_ok is not None and c not in overlap_ok
+                    color = "var(--hi,#c0392b)" if (n >= 4 or warn) else "var(--ink-2,#41505f)"
+                    out.append(f'<span style="display:inline-block;margin:2px 10px 2px 0">'
+                               f'<b style="color:{color}">ch {c}</b> '
+                               f'<span style="color:{color}">{"■" * min(n, 8)}</span> '
+                               f'<span style="color:var(--ink-3,#69727f)">{n}</span></span>')
+                return "".join(out)
+            P.append('<div style="margin-top:14px;font-size:12.5px">')
+            P.append('<div style="font-weight:600;color:var(--ink-3,#69727f);text-transform:uppercase;'
+                     'letter-spacing:.04em;font-size:11px;margin-bottom:4px">Channel usage (RF congestion)</div>')
+            if ch24:
+                total = sum(ch24.values())
+                over = sum(n for c, n in ch24.items() if c not in (1, 6, 11))
+                note = f' — {over} AP(s) off the non-overlapping 1/6/11 channels' if over else ' — all on 1/6/11'
+                P.append(f'<div style="margin-bottom:4px"><b>2.4 GHz</b> ({total} APs{note}): {_bars(ch24, {1, 6, 11})}</div>')
+            if ch5:
+                P.append(f'<div><b>5 GHz</b> ({sum(ch5.values())} APs): {_bars(ch5)}</div>')
+            P.append('<div style="color:var(--ink-3,#69727f);margin-top:4px">Only 2.4 GHz channels 1, 6 and 11 don\'t overlap; crowded channels = slower Wi-Fi.</div>')
+            P.append('</div>')
+        P.append('</div></section>')
 
     # ── 06 WAN — public IP (always, when reachable) + speed test (opt-in) ──
     # A 0 Mbps download means the speed test failed, not a real circuit — treat

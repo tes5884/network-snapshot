@@ -325,6 +325,32 @@ def assess(snapshot, cats, host_cat):
             "Legacy wireless encryption that is trivially broken.",
             hosts=weak_ssids, scope_hint="Upgrade APs / re-key to WPA2-AES or WPA3."))
 
+    # 2.4 GHz RF congestion — only channels 1/6/11 don't overlap. Richest with a
+    # monitor-mode survey (it hears neighbouring APs too, which is the whole
+    # congestion picture).
+    ch_24: dict[int, int] = {}
+    for w in snapshot.get("wifi", []):
+        ch = w.get("channel")
+        if isinstance(ch, int) and 1 <= ch <= 14:
+            ch_24[ch] = ch_24.get(ch, 0) + 1
+    if ch_24:
+        total_24 = sum(ch_24.values())
+        busiest_ch = max(ch_24, key=ch_24.get)
+        busiest_n = ch_24[busiest_ch]
+        overlapping = sum(n for c, n in ch_24.items() if c not in (1, 6, 11))
+        if busiest_n >= 4 or total_24 >= 8 or overlapping >= 4:
+            detail = f"{total_24} access points heard on 2.4 GHz"
+            if busiest_n >= 3:
+                detail += f", {busiest_n} sharing channel {busiest_ch}"
+            if overlapping:
+                detail += f"; {overlapping} on overlapping channels (only 1/6/11 don't overlap)"
+            detail += ". Crowded 2.4 GHz air time is a common cause of slow / flaky Wi-Fi."
+            findings.append(_finding(
+                "medium", "opportunity", "2.4 GHz Wi-Fi congestion",
+                detail,
+                hosts=[f"ch {c}: {n} AP{'s' if n != 1 else ''}" for c, n in sorted(ch_24.items())],
+                scope_hint="Steer clients to 5 GHz, thin out 2.4 GHz APs/power, pin APs to channels 1/6/11."))
+
     # Rogue / multiple DHCP servers.
     dhcp_servers = (net.get("dhcp") or {}).get("servers") or []
     gw_ip = (net.get("gateway") or {}).get("ipv4")

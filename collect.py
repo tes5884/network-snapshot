@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.4.2"
+COLLECTOR_VERSION = "0.4.3"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
@@ -859,10 +859,11 @@ def monitor_wifi(mon_iface: str, seconds: int) -> list[dict]:
         prefix = "/tmp/snapshot-wifi"
         run(["rm", "-f"] + [prefix + s for s in ("-01.csv", "-01.cap", "-01.kismet.csv",
                                                  "-01.kismet.netxml", "-01.log.csv")], 5)
-        # airodump runs until timeout; `run` kills it at the deadline. It
-        # channel-hops on its own across the bands the adapter supports.
-        run(["airodump-ng", "--output-format", "csv", "--write-interval", "1", "-w", prefix, mon_iface],
-            seconds + 3)
+        # airodump runs until timeout; `run` kills it at the deadline. `--band
+        # abg` makes it hop 5 GHz too (default is 2.4 GHz only) on dual-band
+        # adapters; harmless on 2.4-only cards.
+        run(["airodump-ng", "--band", "abg", "--output-format", "csv", "--write-interval", "1",
+             "-w", prefix, mon_iface], seconds + 3)
         try:
             with open(prefix + "-01.csv") as f:
                 return parse_airodump_csv(f.read())["aps"]

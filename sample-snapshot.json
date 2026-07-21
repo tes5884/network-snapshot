@@ -5,7 +5,7 @@
     "finished_at": "2026-07-18T14:11:20+00:00",
     "duration_seconds": 560,
     "mode": "active",
-    "collector_version": "0.4.2",
+    "collector_version": "0.4.3",
     "site_label": "Acme Dental (DEMO)",
     "location": "reception jack",
     "operator": "tzvi",
