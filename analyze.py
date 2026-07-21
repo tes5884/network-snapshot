@@ -325,6 +325,22 @@ def assess(snapshot, cats, host_cat):
             "Legacy wireless encryption that is trivially broken.",
             hosts=weak_ssids, scope_hint="Upgrade APs / re-key to WPA2-AES or WPA3."))
 
+    # Rogue / multiple DHCP servers.
+    dhcp_servers = (net.get("dhcp") or {}).get("servers") or []
+    gw_ip = (net.get("gateway") or {}).get("ipv4")
+    if len(dhcp_servers) > 1:
+        findings.append(_finding("high", "risk", "Multiple DHCP servers (possible rogue DHCP)",
+            f"{len(dhcp_servers)} DHCP servers answered a DISCOVER on this segment — there should be exactly one. "
+            "A rogue/second DHCP can hand clients a malicious gateway or DNS (man-in-the-middle), or simply break connectivity.",
+            hosts=[f"{s.get('server', '?')} → offers {s.get('offered_ip', '?')} (gw {s.get('router', '?')}, dns {s.get('dns', '?')})"
+                   for s in dhcp_servers],
+            scope_hint="Find the rogue/second DHCP source; enable DHCP snooping on the managed switches."))
+    elif len(dhcp_servers) == 1 and gw_ip and dhcp_servers[0].get("server") and dhcp_servers[0]["server"] != gw_ip:
+        findings.append(_finding("info", "opportunity", "DHCP server is separate from the gateway",
+            f"DHCP is served by {dhcp_servers[0]['server']}, not the gateway ({gw_ip}). Often fine (a dedicated DHCP or "
+            "domain controller), but worth confirming it's intentional.",
+            scope_hint="Confirm the DHCP source and document it."))
+
     # DNS zone transfer.
     dns = net.get("dns") or {}
     if dns.get("axfr_open"):

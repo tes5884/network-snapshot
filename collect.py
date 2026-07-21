@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.2.0"
+COLLECTOR_VERSION = "0.2.1"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
@@ -835,6 +835,57 @@ def attach_mdns(hosts: list[dict], mdns: dict[str, list[str]]) -> None:
                 h.setdefault("discovered_by", []).append("mdns")
 
 
+def parse_dhcp_discover(out: str) -> list[dict]:
+    """Parse nmap broadcast-dhcp-discover output into one entry per responding
+    DHCP server (deduped by server identifier)."""
+    servers, cur = [], None
+    for line in out.splitlines():
+        s = line.strip().lstrip("|_").strip()
+        if re.match(r"Response \d+ of \d+", s):
+            if cur:
+                servers.append(cur)
+            cur = {}
+            continue
+        if cur is None:
+            continue
+        m = re.match(r"([A-Za-z ]+):\s*(.+)", s)
+        if not m:
+            continue
+        key, val = m.group(1).strip().lower(), m.group(2).strip()
+        if key == "server identifier":
+            cur["server"] = val
+        elif key == "ip offered":
+            cur["offered_ip"] = val
+        elif key == "router":
+            cur["router"] = val
+        elif key.startswith("domain name server"):
+            cur["dns"] = val
+    if cur:
+        servers.append(cur)
+    seen, uniq = set(), []
+    for sv in servers:
+        sid = sv.get("server") or sv.get("router") or sv.get("offered_ip")
+        if sid and sid not in seen:
+            seen.add(sid)
+            uniq.append(sv)
+    return uniq
+
+
+def dhcp_probe(iface: str | None = None) -> dict:
+    """Broadcast a single DHCP DISCOVER and record every server that OFFERs.
+    More than one distinct server on a segment = a rogue/second DHCP — a
+    man-in-the-middle vector (malicious gateway/DNS) or a "someone plugged in a
+    second router" misconfig. Uses nmap's broadcast-dhcp-discover NSE."""
+    if not have("nmap"):
+        return {"servers": [], "count": 0}
+    cmd = ["nmap", "--script", "broadcast-dhcp-discover"]
+    if iface:
+        cmd += ["-e", iface]
+    _, out, _ = run(cmd, 45)
+    servers = parse_dhcp_discover(out)
+    return {"servers": servers, "count": len(servers)}
+
+
 def collect(args) -> dict:
     started = time.time()
     started_iso = now_iso()
@@ -918,6 +969,7 @@ def collect(args) -> dict:
     # DNS (reverse + AXFR), NetBIOS names, WAN speed — active-side enrichment.
     dns = {"servers": [], "domains": [], "reverse": {}, "axfr": {}, "axfr_open": False}
     netbios: dict = {}
+    dhcp = {"servers": [], "count": 0}
     wan = None
     if not args.passive:
         log("DNS recon (reverse + AXFR attempt)…")
@@ -928,6 +980,8 @@ def collect(args) -> dict:
             for h in hosts:
                 if h["ipv4"] in netbios:
                     h["netbios_name"] = netbios[h["ipv4"]]
+        log("DHCP probe (rogue-server check)…")
+        dhcp = step("dhcp", lambda: dhcp_probe(iface)) or dhcp
     # Public/WAN IP is cheap and always worth having (one outbound request);
     # the speed test is opt-in because it saturates the circuit. When both run,
     # the speed test's own ISP/IP readings win (cleaner than the echo service).
@@ -1001,6 +1055,7 @@ def collect(args) -> dict:
             "topology_edges": snmp["edges"],
             "dns": dns,
             "netbios": netbios,
+            "dhcp": dhcp,
             "wan": wan,
         },
         "wifi": wifi,
@@ -1077,6 +1132,10 @@ def demo_snapshot() -> dict:
                     {"name": "timeclock.acme.local", "type": "A", "value": "10.0.0.77"}]},
             },
             "netbios": {"10.0.0.101": "RECEPTION-PC", "10.0.0.6": "DC1"},
+            "dhcp": {"count": 2, "servers": [
+                {"server": "10.0.0.1", "offered_ip": "10.0.0.55", "router": "10.0.0.1", "dns": "10.0.0.1"},
+                {"server": "10.0.0.240", "offered_ip": "10.0.0.88", "router": "10.0.0.240", "dns": "8.8.8.8"},
+            ]},
             "wan": {"public_ip": "203.0.113.47", "download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "Optimum", "geo": "New York, NY", "server": "New York, NY"},
         },
         "wifi": [

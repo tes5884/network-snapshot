@@ -119,6 +119,7 @@ anything that speaks the same POST.
 | WiFi survey | `nmcli` | both | SSIDs, encryption, channel, signal |
 | DNS recon | `dig` | active | reverse-DNS host names + AXFR zone dump (full inventory if the DNS server allows it) |
 | NetBIOS | `nbtscan` | active | Windows names + workgroup/domain |
+| DHCP probe | `nmap` (broadcast-dhcp-discover) | active | every DHCP server that OFFERs — >1 = rogue/second DHCP (MITM risk) |
 | SNMP discovery | `onesixtyone` | active | every SNMP responder + working community → feeds topology |
 | Public/WAN IP | `urllib` (ipinfo) | both | the site's public IP + ISP/org — one outbound request, doesn't touch the LAN |
 | WAN speed | `speedtest-cli` | opt-in `--speedtest` | download/upload/ping of the internet circuit |
