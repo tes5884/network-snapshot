@@ -6,3 +6,5 @@ __pycache__/
 
 # auto-submit config (contains the intake secret)
 submit.conf
+agent.conf
+agent-identity.json
