@@ -554,22 +554,35 @@ def render(model, narrative_md=None):
     wifi = model["wifi"]
     if wifi:
         P.append('<section><div class="pad">')
-        P.append(head("Wireless Survey", f"{len(wifi)} SSIDs in range"))
-        P.append('<table class="tbl sortable"><tr><th>SSID</th><th>AP (BSSID)</th><th>Band / ch</th><th>Security</th><th class="num">Signal</th></tr>')
-        for w in sorted(wifi, key=lambda x: -(x.get("signal") or 0)):
+        # Monitor-mode captures per-AP client counts + hidden SSIDs; managed
+        # scans don't. Only show the Clients column when we actually have it.
+        has_clients = any(w.get("clients") is not None for w in wifi)
+        P.append(head("Wireless Survey", f"{len(wifi)} access points in range"))
+        clients_th = '<th class="num">Clients</th>' if has_clients else ""
+        P.append('<table class="tbl sortable"><tr><th>SSID</th><th>AP (BSSID)</th>'
+                 f'<th>Band / ch</th><th>Security</th>{clients_th}<th class="num">Signal</th></tr>')
+        for w in sorted(wifi, key=lambda x: -(x.get("clients") or 0) if has_clients else (x.get("signal") or 0)):
             sec = (w.get("security") or "").upper()
             if sec in ("OPEN", "", "NONE"):
                 pill = '<span class="pill warn">OPEN</span>'
-            elif sec in ("WEP", "WPA"):
+            elif "WEP" in sec or sec == "WPA":
                 pill = f'<span class="pill mid">{esc(sec)}</span>'
             else:
                 pill = f'<span class="pill ok">{esc(sec)}</span>'
             sig = w.get("signal")
+            # managed = 0-100 (%), monitor = negative dBm
+            sig_txt = "—" if sig is None else (f"{sig} dBm" if sig < 0 else f"{sig}%")
             bssid = w.get("bssid")
-            P.append(f'<tr><td><b>{esc(w.get("ssid") or "(hidden)")}</b></td>'
+            ssid = w.get("ssid") or "(hidden)"
+            ssid_html = f'<i>{esc(ssid)}</i>' if w.get("hidden") else f'<b>{esc(ssid)}</b>'
+            clients_td = ""
+            if has_clients:
+                c = w.get("clients")
+                clients_td = f'<td class="num">{esc(c) if c else "—"}</td>'
+            P.append(f'<tr><td>{ssid_html}</td>'
                      f'<td><code>{esc(bssid) if bssid else "—"}</code></td>'
                      f'<td>{esc(w.get("band") or "")} · ch {esc(w.get("channel"))}</td>'
-                     f'<td>{pill}</td><td class="num">{esc(sig)+"%" if sig is not None else "—"}</td></tr>')
+                     f'<td>{pill}</td>{clients_td}<td class="num">{sig_txt}</td></tr>')
         P.append('</table></div></section>')
 
     # ── 06 WAN — public IP (always, when reachable) + speed test (opt-in) ──
