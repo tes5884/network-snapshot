@@ -119,10 +119,28 @@ def enroll(conf, ident):
 def heartbeat(conf, ident):
     try:
         _, r = _req(conf, ident, "POST", "/scanners/heartbeat", body={"net_info": net_info()})
+        maybe_run_command(r)
         return r
     except Exception as e:  # noqa: BLE001
         log(f"heartbeat failed: {e}")
         return None
+
+
+def maybe_run_command(r):
+    """The hub delivers a queued power command once on heartbeat. Honour it —
+    the operator drives the field unit from the phone, no console needed."""
+    cmd = (r or {}).get("command")
+    if cmd not in ("reboot", "poweroff"):
+        return
+    log(f"remote command received: {cmd} — executing")
+    flag = "-r" if cmd == "reboot" else "-h"
+    base = ["shutdown", flag, "now", f"TEQhub field-scanner {cmd}"]
+    # service runs as root, so call shutdown directly; fall back to sudo -n if not
+    argv = base if os.geteuid() == 0 else ["sudo", "-n", *base]
+    try:
+        subprocess.Popen(argv)  # fire-and-go; the box is on its way down
+    except Exception as e:  # noqa: BLE001
+        log(f"command failed ({e}); need root or passwordless sudo for shutdown")
 
 
 def poll_job(conf, ident):
