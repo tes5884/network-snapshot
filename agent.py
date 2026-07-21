@@ -21,6 +21,7 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -187,42 +188,56 @@ def run_job(conf, ident, job):
         except Exception:  # noqa: BLE001
             pass
 
-    progress("starting scan")
-    tail = []
-    last_post = 0.0
-    try:
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            tail.append(line)
-            tail[:] = tail[-40:]
-            # the collector logs each step as "[snapshot] <step>…" — surface it
-            if "[snapshot]" in line and time.time() - last_post > 2:
-                progress(line.split("[snapshot]", 1)[1].strip()[:180])
-                last_post = time.time()
-        rc = proc.wait()
-    except Exception as e:  # noqa: BLE001
-        _fail(conf, ident, jid, f"could not run collector: {e}")
-        return
+    # A scan blocks this loop for minutes, and the collector's slow nmap phase can
+    # go >90s with no output — long enough for the hub to mark us offline. Keep the
+    # heartbeat going on a side thread for the life of the job so we stay online.
+    stop_hb = threading.Event()
 
-    if rc != 0 or not os.path.exists(outfile):
-        _fail(conf, ident, jid, "collector failed:\n" + "\n".join(tail[-15:]))
-        return
+    def _hb_during_job():
+        while not stop_hb.wait(HEARTBEAT_EVERY):
+            heartbeat(conf, ident)
 
-    progress("submitting results")
+    hb_thread = threading.Thread(target=_hb_during_job, daemon=True)
+    hb_thread.start()
     try:
-        snapshot = json.loads(Path(outfile).read_text())
-        _, r = _req(conf, ident, "POST", f"/scanners/jobs/{jid}/result", body=snapshot, timeout=120)
-        log(f"job {jid} done → snapshot {r.get('snapshot_id')}")
-    except Exception as e:  # noqa: BLE001
-        _fail(conf, ident, jid, f"submit failed: {e}")
-    finally:
+        progress("starting scan")
+        tail = []
+        last_post = 0.0
         try:
-            os.remove(outfile)
-        except OSError:
-            pass
+            proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                tail.append(line)
+                tail[:] = tail[-40:]
+                # the collector logs each step as "[snapshot] <step>…" — surface it
+                if "[snapshot]" in line and time.time() - last_post > 2:
+                    progress(line.split("[snapshot]", 1)[1].strip()[:180])
+                    last_post = time.time()
+            rc = proc.wait()
+        except Exception as e:  # noqa: BLE001
+            _fail(conf, ident, jid, f"could not run collector: {e}")
+            return
+
+        if rc != 0 or not os.path.exists(outfile):
+            _fail(conf, ident, jid, "collector failed:\n" + "\n".join(tail[-15:]))
+            return
+
+        progress("submitting results")
+        try:
+            snapshot = json.loads(Path(outfile).read_text())
+            _, r = _req(conf, ident, "POST", f"/scanners/jobs/{jid}/result", body=snapshot, timeout=120)
+            log(f"job {jid} done → snapshot {r.get('snapshot_id')}")
+        except Exception as e:  # noqa: BLE001
+            _fail(conf, ident, jid, f"submit failed: {e}")
+        finally:
+            try:
+                os.remove(outfile)
+            except OSError:
+                pass
+    finally:
+        stop_hb.set()
 
 
 def _fail(conf, ident, jid, err):
