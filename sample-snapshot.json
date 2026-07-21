@@ -5,7 +5,7 @@
     "finished_at": "2026-07-18T14:11:20+00:00",
     "duration_seconds": 560,
     "mode": "active",
-    "collector_version": "0.3.0",
+    "collector_version": "0.4.0",
     "site_label": "Acme Dental (DEMO)",
     "location": "reception jack",
     "operator": "tzvi",
@@ -472,13 +472,23 @@
   "wifi": [
     {
       "ssid": "Acme-Corp",
+      "bssid": "B8:27:EB:1A:2B:01",
       "channel": 36,
       "band": "5GHz",
       "security": "WPA2",
       "signal": 82
     },
     {
+      "ssid": "Acme-Corp",
+      "bssid": "B8:27:EB:1A:2B:02",
+      "channel": 149,
+      "band": "5GHz",
+      "security": "WPA2",
+      "signal": 66
+    },
+    {
       "ssid": "Acme-Guest",
+      "bssid": "B8:27:EB:1A:2B:03",
       "channel": 6,
       "band": "2.4GHz",
       "security": "OPEN",
@@ -486,6 +496,7 @@
     },
     {
       "ssid": "linksys",
+      "bssid": "00:14:BF:9C:5D:1E",
       "channel": 11,
       "band": "2.4GHz",
       "security": "WPA2",

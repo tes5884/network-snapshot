@@ -514,7 +514,7 @@ def render(model, narrative_md=None):
     if wifi:
         P.append('<section><div class="pad">')
         P.append(head("Wireless Survey", f"{len(wifi)} SSIDs in range"))
-        P.append('<table class="tbl"><tr><th>SSID</th><th>Band / ch</th><th>Security</th><th class="num">Signal</th></tr>')
+        P.append('<table class="tbl"><tr><th>SSID</th><th>AP (BSSID)</th><th>Band / ch</th><th>Security</th><th class="num">Signal</th></tr>')
         for w in sorted(wifi, key=lambda x: -(x.get("signal") or 0)):
             sec = (w.get("security") or "").upper()
             if sec in ("OPEN", "", "NONE"):
@@ -524,7 +524,9 @@ def render(model, narrative_md=None):
             else:
                 pill = f'<span class="pill ok">{esc(sec)}</span>'
             sig = w.get("signal")
+            bssid = w.get("bssid")
             P.append(f'<tr><td><b>{esc(w.get("ssid") or "(hidden)")}</b></td>'
+                     f'<td><code>{esc(bssid) if bssid else "—"}</code></td>'
                      f'<td>{esc(w.get("band") or "")} · ch {esc(w.get("channel"))}</td>'
                      f'<td>{pill}</td><td class="num">{esc(sig)+"%" if sig is not None else "—"}</td></tr>')
         P.append('</table></div></section>')

@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.4.0"
+COLLECTOR_VERSION = "0.4.1"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
@@ -741,30 +741,35 @@ def scan_wifi() -> list[dict]:
     aps: list[dict] = []
     if have("nmcli"):
         rc, out, _ = run(
-            ["nmcli", "-t", "-f", "SSID,CHAN,SECURITY,SIGNAL,FREQ", "dev", "wifi", "list", "--rescan", "yes"],
+            ["nmcli", "-t", "-f", "SSID,BSSID,CHAN,SECURITY,SIGNAL,FREQ", "dev", "wifi", "list", "--rescan", "yes"],
             30,
         )
         seen = set()
         for line in out.splitlines():
-            f = line.split(":")
-            if len(f) < 5:
+            # nmcli terse mode delimits with ':' but escapes literal ':' inside a
+            # field (e.g. the BSSID MAC) as '\:'. Split on unescaped colons, then
+            # unescape each field.
+            f = [re.sub(r"\\(.)", r"\1", p) for p in re.split(r"(?<!\\):", line)]
+            if len(f) < 6:
                 continue
             ssid = f[0] or "(hidden)"
-            key = (ssid, f[1])
+            bssid = (f[1] or "").upper() or None
+            key = bssid or (ssid, f[2])  # one row per AP (BSSID), not per SSID
             if key in seen:
                 continue
             seen.add(key)
             try:
-                freq = int(re.sub(r"\D", "", f[4]) or 0)
+                freq = int(re.sub(r"\D", "", f[5]) or 0)
             except ValueError:
                 freq = 0
             band = "6GHz" if freq >= 5925 else "5GHz" if freq >= 5000 else "2.4GHz" if freq else None
             aps.append({
                 "ssid": ssid,
-                "channel": int(f[1]) if f[1].isdigit() else None,
+                "bssid": bssid,
+                "channel": int(f[2]) if f[2].isdigit() else None,
                 "band": band,
-                "security": (f[2] or "OPEN").strip(),
-                "signal": int(f[3]) if f[3].isdigit() else None,
+                "security": (f[3] or "OPEN").strip(),
+                "signal": int(f[4]) if f[4].isdigit() else None,
             })
     return aps
 
@@ -1270,9 +1275,10 @@ def demo_snapshot() -> dict:
             "wan": {"public_ip": "203.0.113.47", "download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "Optimum", "geo": "New York, NY", "server": "New York, NY"},
         },
         "wifi": [
-            {"ssid": "Acme-Corp", "channel": 36, "band": "5GHz", "security": "WPA2", "signal": 82},
-            {"ssid": "Acme-Guest", "channel": 6, "band": "2.4GHz", "security": "OPEN", "signal": 74},
-            {"ssid": "linksys", "channel": 11, "band": "2.4GHz", "security": "WPA2", "signal": 40},
+            {"ssid": "Acme-Corp", "bssid": "B8:27:EB:1A:2B:01", "channel": 36, "band": "5GHz", "security": "WPA2", "signal": 82},
+            {"ssid": "Acme-Corp", "bssid": "B8:27:EB:1A:2B:02", "channel": 149, "band": "5GHz", "security": "WPA2", "signal": 66},
+            {"ssid": "Acme-Guest", "bssid": "B8:27:EB:1A:2B:03", "channel": 6, "band": "2.4GHz", "security": "OPEN", "signal": 74},
+            {"ssid": "linksys", "bssid": "00:14:BF:9C:5D:1E", "channel": 11, "band": "2.4GHz", "security": "WPA2", "signal": 40},
         ],
     }
 
