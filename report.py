@@ -596,28 +596,52 @@ def render(model, narrative_md=None):
                 continue
             (ch24 if ch <= 14 else ch5)[ch] = (ch24 if ch <= 14 else ch5).get(ch, 0) + 1
         if ch24 or ch5:
-            def _bars(counts, overlap_ok=None):
-                out = []
-                for c in sorted(counts):
-                    n = counts[c]
-                    warn = overlap_ok is not None and c not in overlap_ok
-                    color = "var(--hi,#c0392b)" if (n >= 4 or warn) else "var(--ink-2,#41505f)"
-                    out.append(f'<span style="display:inline-block;margin:2px 10px 2px 0">'
-                               f'<b style="color:{color}">ch {c}</b> '
-                               f'<span style="color:{color}">{"■" * min(n, 8)}</span> '
-                               f'<span style="color:var(--ink-3,#69727f)">{n}</span></span>')
-                return "".join(out)
-            P.append('<div style="margin-top:14px;font-size:12.5px">')
-            P.append('<div style="font-weight:600;color:var(--ink-3,#69727f);text-transform:uppercase;'
-                     'letter-spacing:.04em;font-size:11px;margin-bottom:4px">Channel usage (RF congestion)</div>')
+            def _band_chart(title, counts, overlap_ok):
+                if not counts:
+                    return ""
+                mx = max(counts.values())
+                total = sum(counts.values())
+                rows = []
+                for c, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+                    over = overlap_ok is not None and c not in overlap_ok
+                    if n >= 4:
+                        col, tag = "#c0392b", "congested"
+                    elif over:
+                        col, tag = "#c77b1a", "overlaps 1/6/11"
+                    else:
+                        col, tag = "#5a7a3e", "clear"
+                    w = max(5, round(n / mx * 100))
+                    rows.append(
+                        '<div style="display:flex;align-items:center;gap:8px;margin:3px 0">'
+                        f'<span style="width:52px;font-weight:600;font-variant-numeric:tabular-nums">ch {c}</span>'
+                        '<span style="flex:1;max-width:300px;background:var(--line-2,#eef1f5);border-radius:4px;height:16px">'
+                        f'<span style="display:block;height:16px;width:{w}%;background:{col};border-radius:4px"></span></span>'
+                        f'<span style="width:60px;font-variant-numeric:tabular-nums;color:var(--ink-3,#69727f)">{n} AP{"s" if n != 1 else ""}</span>'
+                        f'<span style="font-size:11px;color:{col}">{tag}</span></div>')
+                return (f'<div style="margin-bottom:12px"><div style="font-weight:600;margin-bottom:3px">{title} '
+                        f'<span style="color:var(--ink-3,#69727f);font-weight:400">— {total} access points heard</span></div>'
+                        + "".join(rows) + "</div>")
+
+            # Plain-English takeaway based on the busiest 2.4 GHz channel.
+            lead = ""
             if ch24:
-                total = sum(ch24.values())
-                over = sum(n for c, n in ch24.items() if c not in (1, 6, 11))
-                note = f' — {over} AP(s) off the non-overlapping 1/6/11 channels' if over else ' — all on 1/6/11'
-                P.append(f'<div style="margin-bottom:4px"><b>2.4 GHz</b> ({total} APs{note}): {_bars(ch24, {1, 6, 11})}</div>')
-            if ch5:
-                P.append(f'<div><b>5 GHz</b> ({sum(ch5.values())} APs): {_bars(ch5)}</div>')
-            P.append('<div style="color:var(--ink-3,#69727f);margin-top:4px">Only 2.4 GHz channels 1, 6 and 11 don\'t overlap; crowded channels = slower Wi-Fi.</div>')
+                bc = max(ch24, key=ch24.get)
+                bn = ch24[bc]
+                if bn >= 4:
+                    lead = (f"Your 2.4 GHz band is crowded — {bn} access points (yours plus neighbours) are "
+                            f"packed onto channel {bc}, so they take turns and everyone slows down.")
+                else:
+                    lead = "2.4 GHz channel spread looks reasonable."
+            P.append('<div style="margin-top:16px;font-size:12.5px">')
+            P.append('<div style="font-weight:600;color:var(--ink-3,#69727f);text-transform:uppercase;'
+                     'letter-spacing:.04em;font-size:11px;margin-bottom:6px">Channel usage (RF congestion)</div>')
+            if lead:
+                P.append(f'<div style="margin-bottom:10px">{esc(lead)}</div>')
+            P.append(_band_chart("2.4 GHz", ch24, {1, 6, 11}))
+            P.append(_band_chart("5 GHz", ch5, None))
+            P.append('<div style="color:var(--ink-3,#69727f);margin-top:2px">'
+                     'Each bar = access points sharing that channel (yours + neighbours). Fewer per channel is faster; '
+                     'in 2.4 GHz only channels 1, 6 and 11 don\'t overlap, so anything else steps on its neighbours.</div>')
             P.append('</div>')
         P.append('</div></section>')
 
