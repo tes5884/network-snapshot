@@ -588,21 +588,32 @@ def render(model, narrative_md=None):
         # Channel usage / RF congestion — how many APs share each channel. In
         # 2.4 GHz only 1/6/11 don't overlap, so anything else (or a crowded
         # channel) is congestion. Neighbouring APs count — that's the real air.
-        ch24: dict[int, int] = {}
-        ch5: dict[int, int] = {}
+        by24: dict[int, list] = {}
+        by5: dict[int, list] = {}
         for w in wifi:
             ch = w.get("channel")
             if not isinstance(ch, int):
                 continue
-            (ch24 if ch <= 14 else ch5)[ch] = (ch24 if ch <= 14 else ch5).get(ch, 0) + 1
-        if ch24 or ch5:
-            def _band_chart(title, counts, overlap_ok):
-                if not counts:
+            (by24 if ch <= 14 else by5).setdefault(ch, []).append(w)
+
+        def _strong(w):
+            # dBm (monitor) >= -68 or % (managed) >= 45 → likely on-premise, not
+            # a distant neighbour bleeding in.
+            s = w.get("signal")
+            if s is None:
+                return False
+            return s >= -68 if s < 0 else s >= 45
+
+        if by24 or by5:
+            def _band_chart(title, by, overlap_ok):
+                if not by:
                     return ""
-                mx = max(counts.values())
-                total = sum(counts.values())
+                mx = max(len(v) for v in by.values())
+                total = sum(len(v) for v in by.values())
+                strong = sum(1 for v in by.values() for w in v if _strong(w))
                 rows = []
-                for c, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+                for c, aps in sorted(by.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+                    n = len(aps)
                     over = overlap_ok is not None and c not in overlap_ok
                     if n >= 4:
                         col, tag = "#c0392b", "congested"
@@ -610,26 +621,41 @@ def render(model, narrative_md=None):
                         col, tag = "#c77b1a", "overlaps 1/6/11"
                     else:
                         col, tag = "#5a7a3e", "clear"
-                    w = max(5, round(n / mx * 100))
+                    width = max(5, round(n / mx * 100))
                     rows.append(
                         '<div style="display:flex;align-items:center;gap:8px;margin:3px 0">'
                         f'<span style="width:52px;font-weight:600;font-variant-numeric:tabular-nums">ch {c}</span>'
                         '<span style="flex:1;max-width:300px;background:var(--line-2,#eef1f5);border-radius:4px;height:16px">'
-                        f'<span style="display:block;height:16px;width:{w}%;background:{col};border-radius:4px"></span></span>'
+                        f'<span style="display:block;height:16px;width:{width}%;background:{col};border-radius:4px"></span></span>'
                         f'<span style="width:60px;font-variant-numeric:tabular-nums;color:var(--ink-3,#69727f)">{n} AP{"s" if n != 1 else ""}</span>'
                         f'<span style="font-size:11px;color:{col}">{tag}</span></div>')
-                return (f'<div style="margin-bottom:12px"><div style="font-weight:600;margin-bottom:3px">{title} '
-                        f'<span style="color:var(--ink-3,#69727f);font-weight:400">— {total} access points heard</span></div>'
-                        + "".join(rows) + "</div>")
+                    # For channels with 2+ APs, list the networks (strongest first;
+                    # bold = strong signal / likely on-site).
+                    if n >= 2:
+                        names = sorted(aps, key=lambda x: -(x.get("signal") if x.get("signal") is not None else -999))
+                        chips = []
+                        for a in names[:6]:
+                            nm = esc(a.get("ssid") or "(hidden)")
+                            chips.append(f'<b>{nm}</b>' if _strong(a) else f'<span style="color:var(--ink-3,#69727f)">{nm}</span>')
+                        more = f' <span style="color:var(--ink-3,#69727f)">+{n - 6} more</span>' if n > 6 else ""
+                        rows.append(f'<div style="margin:0 0 6px 60px;font-size:11px">{" · ".join(chips)}{more}</div>')
+                head_ = (f'<div style="font-weight:600;margin-bottom:3px">{title} '
+                         f'<span style="color:var(--ink-3,#69727f);font-weight:400">— {total} access points heard'
+                         + (f", {strong} close by" if strong else "") + '</span></div>')
+                return f'<div style="margin-bottom:12px">{head_}{"".join(rows)}</div>'
 
             # Plain-English takeaway based on the busiest 2.4 GHz channel.
             lead = ""
-            if ch24:
-                bc = max(ch24, key=ch24.get)
-                bn = ch24[bc]
-                if bn >= 4:
-                    lead = (f"Your 2.4 GHz band is crowded — {bn} access points (yours plus neighbours) are "
-                            f"packed onto channel {bc}, so they take turns and everyone slows down.")
+            if by24:
+                bc = max(by24, key=lambda k: len(by24[k]))
+                bn = len(by24[bc])
+                if bn >= 6:
+                    lead = (f"Channel {bc} is jammed — {bn} access points are competing for it. With this many, much "
+                            f"of it is neighbouring networks you can't re-channel, so the practical fix is keeping your "
+                            f"own devices on 5 GHz (which is far less crowded here).")
+                elif bn >= 4:
+                    lead = (f"2.4 GHz is getting crowded — {bn} access points share channel {bc}. Spread the APs you "
+                            f"control across channels 1/6/11 and steer clients to 5 GHz.")
                 else:
                     lead = "2.4 GHz channel spread looks reasonable."
             P.append('<div style="margin-top:16px;font-size:12.5px">')
@@ -637,11 +663,12 @@ def render(model, narrative_md=None):
                      'letter-spacing:.04em;font-size:11px;margin-bottom:6px">Channel usage (RF congestion)</div>')
             if lead:
                 P.append(f'<div style="margin-bottom:10px">{esc(lead)}</div>')
-            P.append(_band_chart("2.4 GHz", ch24, {1, 6, 11}))
-            P.append(_band_chart("5 GHz", ch5, None))
+            P.append(_band_chart("2.4 GHz", by24, {1, 6, 11}))
+            P.append(_band_chart("5 GHz", by5, None))
             P.append('<div style="color:var(--ink-3,#69727f);margin-top:2px">'
-                     'Each bar = access points sharing that channel (yours + neighbours). Fewer per channel is faster; '
-                     'in 2.4 GHz only channels 1, 6 and 11 don\'t overlap, so anything else steps on its neighbours.</div>')
+                     'Each bar = access points sharing that channel; <b>bold</b> = a strong signal (physically close — '
+                     'could be yours or an adjacent tenant). Fewer APs per channel is faster; in 2.4 GHz only channels '
+                     '1, 6 and 11 don\'t overlap, so anything else steps on its neighbours.</div>')
             P.append('</div>')
         P.append('</div></section>')
 
