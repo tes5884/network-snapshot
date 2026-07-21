@@ -171,6 +171,9 @@ section:first-of-type{border-top:0}
 .tbl td{padding:8px 12px;border-bottom:1px solid var(--line-2)}
 .tbl tr:last-child td{border-bottom:0}
 .tbl .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tbl.sortable th{cursor:pointer;user-select:none;white-space:nowrap}
+.tbl.sortable th:hover{color:var(--ink)}
+.tbl.sortable th .sort-ind{color:var(--accent,#2a6);font-weight:700}
 .pill{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:4px}
 .pill.ok{background:var(--low-bg);color:var(--low)}
 .pill.warn{background:var(--hi-bg);color:var(--hi)}
@@ -357,6 +360,44 @@ def _port_summary(rec, limit=4):
     return ("·".join(out) + (f" +{extra}" if extra > 0 else "")) if out else ""
 
 
+# Click-to-sort for any <table class="sortable">. Numeric columns (e.g. Signal)
+# sort by value; the rest alphabetically. Repeated clicks toggle direction.
+SORT_JS = """<script>
+(function(){
+  function num(t){ var m=(t||'').replace('%','').replace(/[, ]/g,'').trim();
+    return /^-?\\d+(\\.\\d+)?$/.test(m) ? parseFloat(m) : null; }
+  document.querySelectorAll('table.sortable').forEach(function(table){
+    var head=table.querySelector('tr'); if(!head) return;
+    var ths=Array.prototype.slice.call(head.children);
+    ths.forEach(function(th,idx){
+      th.addEventListener('click',function(){
+        var rows=Array.prototype.slice.call(table.querySelectorAll('tr')).slice(1);
+        var asc=th.getAttribute('data-dir')!=='asc';
+        ths.forEach(function(h){ h.removeAttribute('data-dir');
+          var s=h.querySelector('.sort-ind'); if(s) s.remove(); });
+        th.setAttribute('data-dir',asc?'asc':'desc');
+        var allNum=rows.length>0 && rows.every(function(r){
+          var c=r.children[idx]; return !c || c.textContent.trim()===''
+            || c.textContent.trim()==='\\u2014' || num(c.textContent)!==null; });
+        rows.sort(function(a,b){
+          var ta=(a.children[idx]?a.children[idx].textContent:'').trim();
+          var tb=(b.children[idx]?b.children[idx].textContent:'').trim();
+          if(allNum){ var na=num(ta), nb=num(tb);
+            if(na===null)na=-Infinity; if(nb===null)nb=-Infinity;
+            return asc?na-nb:nb-na; }
+          return asc?ta.localeCompare(tb,undefined,{numeric:true})
+                    :tb.localeCompare(ta,undefined,{numeric:true}); });
+        var body=rows.length?rows[0].parentNode:null;
+        rows.forEach(function(r){ body.appendChild(r); });
+        var ind=document.createElement('span'); ind.className='sort-ind';
+        ind.textContent=asc?' \\u25b2':' \\u25bc'; th.appendChild(ind);
+      });
+    });
+  });
+})();
+</script>"""
+
+
 # ── render ───────────────────────────────────────────────────────────────────
 def render(model, narrative_md=None):
     scan = model["scan"]
@@ -514,7 +555,7 @@ def render(model, narrative_md=None):
     if wifi:
         P.append('<section><div class="pad">')
         P.append(head("Wireless Survey", f"{len(wifi)} SSIDs in range"))
-        P.append('<table class="tbl"><tr><th>SSID</th><th>AP (BSSID)</th><th>Band / ch</th><th>Security</th><th class="num">Signal</th></tr>')
+        P.append('<table class="tbl sortable"><tr><th>SSID</th><th>AP (BSSID)</th><th>Band / ch</th><th>Security</th><th class="num">Signal</th></tr>')
         for w in sorted(wifi, key=lambda x: -(x.get("signal") or 0)):
             sec = (w.get("security") or "").upper()
             if sec in ("OPEN", "", "NONE"):
@@ -606,7 +647,7 @@ def render(model, narrative_md=None):
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{title} — Network Snapshot</title><style>{CSS}</style></head>'
-            f'<body>{body}</body></html>')
+            f'<body>{body}{SORT_JS}</body></html>')
 
 
 def main(argv=None):
