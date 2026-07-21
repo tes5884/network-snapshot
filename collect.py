@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.2.1"
+COLLECTOR_VERSION = "0.3.0"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
@@ -304,12 +304,24 @@ def capture_lldp(iface: str, seconds: int) -> list[dict]:
                     chassis = det.get("chassis", {})
                     port = det.get("port", {})
                     sw_name = next(iter(chassis)) if isinstance(chassis, dict) and chassis else None
+                    chassis_det = chassis.get(sw_name, {}) if isinstance(chassis, dict) else {}
                     vlan = det.get("vlan", {})
+
+                    def _val(x):
+                        if isinstance(x, dict):
+                            return x.get("value")
+                        if isinstance(x, list) and x:
+                            return x[0].get("value") if isinstance(x[0], dict) else x[0]
+                        return x
+
                     neighbors.append({
                         "local_port": name,
                         "switch_name": sw_name,
                         "switch_port": (port.get("id", {}) or {}).get("value") if isinstance(port.get("id"), dict) else port.get("descr"),
+                        "port_descr": _val(port.get("descr")),
                         "vlan": (vlan.get("vlan-id") if isinstance(vlan, dict) else None),
+                        "mgmt_ip": _val(chassis_det.get("mgmt-ip")),
+                        "poe": bool(port.get("power")),
                         "source": "lldpd",
                     })
             except (ValueError, AttributeError):
@@ -333,6 +345,34 @@ def capture_lldp(iface: str, seconds: int) -> list[dict]:
                     "source": "tcpdump",
                 })
     return neighbors
+
+
+def stp_probe(iface: str, seconds: int) -> dict:
+    """Listen for spanning-tree BPDUs (the switch sends them ~every 2s; we only
+    listen, emit nothing). Reveals STP vs RSTP vs MSTP, the root bridge, and
+    whether the root is tuned — the spanning tree as seen from this jack."""
+    if not have("tcpdump") or not iface:
+        return {"present": False}
+    _, out, _ = run(["tcpdump", "-i", iface, "-c", "4", "-e", "-v", "-nn", "stp"], min(seconds, 15) + 6)
+    if not out or "STP" not in out:
+        return {"present": False}
+    version = ("rstp" if re.search(r"802\.1w|Rapid STP", out)
+               else "mstp" if re.search(r"802\.1s|MSTP", out) else "stp")
+
+    def bridge_id(label):
+        m = re.search(label + r"\s+([0-9a-fA-F]{1,4})\.((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})", out)
+        return {"priority": int(m.group(1), 16), "mac": m.group(2).lower()} if m else None
+
+    root, bridge = bridge_id("root-id"), bridge_id("bridge-id")
+    cost = re.search(r"root-pathcost\s+(\d+)", out)
+    return {
+        "present": True,
+        "version": version,
+        "root": root,
+        "designated_bridge": bridge,
+        "root_pathcost": int(cost.group(1)) if cost else None,
+        "is_root_here": bool(root and bridge and root["mac"] == bridge["mac"]),
+    }
 
 
 # ── Passive: mDNS service discovery ──────────────────────────────────────────
@@ -926,6 +966,8 @@ def collect(args) -> dict:
     mdns = step("mdns", lambda: browse_mdns(min(args.listen, 15))) or {}
     log("LLDP/CDP capture…")
     lldp = step("lldp", lambda: capture_lldp(iface, args.listen)) or [] if iface else []
+    log("Spanning-tree (BPDU) listen…")
+    stp = step("stp", lambda: stp_probe(iface, args.listen)) if iface else {"present": False}
     wifi = []
     if not args.no_wifi:
         if args.wifi_monitor:
@@ -1051,6 +1093,7 @@ def collect(args) -> dict:
             "vlans_seen": [{"id": v, "source": "lldp"} for v in vlans],
             "lldp_neighbors": lldp,
             "gateway": gateway,
+            "stp": stp,
             "snmp_devices": snmp["devices"],
             "topology_edges": snmp["edges"],
             "dns": dns,
@@ -1105,8 +1148,9 @@ def demo_snapshot() -> dict:
         "network": {
             "subnets_seen": ["10.0.0.0/24"],
             "vlans_seen": [],
-            "lldp_neighbors": [{"local_port": "eth0", "switch_name": "SW-CORE", "switch_port": "Gi1/0/1", "vlan": None, "source": "lldpd"}],
+            "lldp_neighbors": [{"local_port": "eth0", "switch_name": "SW-CORE", "switch_port": "Gi1/0/1", "port_descr": "Uplink", "vlan": 1, "mgmt_ip": "10.0.0.2", "poe": True, "source": "lldpd"}],
             "gateway": {"ipv4": "10.0.0.1", "vendor": "Ubiquiti Inc", "identity": "UniFi Dream Machine Pro", "role_guess": "router/firewall"},
+            "stp": {"present": True, "version": "stp", "root": {"priority": 32768, "mac": "00:11:32:aa:bb:01"}, "designated_bridge": {"priority": 32768, "mac": "18:e8:29:11:22:33"}, "root_pathcost": 4, "is_root_here": False},
             "snmp_devices": [
                 {"ip": "10.0.0.2", "sysname": "SW-CORE", "sysdescr": "UniFi Switch 48 PoE", "role_guess": "switch",
                  "neighbor_count": 2, "neighbors": [

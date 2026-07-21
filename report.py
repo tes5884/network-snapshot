@@ -152,6 +152,8 @@ section:first-of-type{border-top:0}
 .dupe{font-size:10px;color:var(--ink-3);font-style:italic}
 
 /* Topology */
+.uplink{background:var(--accent-soft);border:1px solid var(--line);border-radius:8px;
+  padding:9px 13px;margin-bottom:10px;font-size:13px;color:var(--ink-2)}
 .topo{background:var(--ground);border:1px solid var(--line);border-radius:8px;
   padding:20px;overflow-x:auto}
 .topo svg{display:block;margin:0 auto;max-width:100%}
@@ -466,22 +468,46 @@ def render(model, narrative_md=None):
 
     # ── 04 Topology ──
     svg = topo_svg(net)
-    if svg:
+    uplink = next((n for n in (net.get("lldp_neighbors") or []) if n.get("switch_name") or n.get("switch_port")), None)
+    stp = net.get("stp") or {}
+    if svg or uplink or stp.get("present"):
         P.append('<section><div class="pad">')
-        P.append(head("Network Topology", "from SNMP/LLDP · this broadcast domain"))
-        P.append(f'<div class="topo">{svg}')
-        # neighbor detail table
-        edges = net.get("snmp_devices", [])
-        nbrs = [(d.get("sysname") or d.get("ip"), nb.get("local_port"), nb.get("neighbor_name"), nb.get("neighbor_port"))
-                for d in edges for nb in d.get("neighbors", [])]
-        if nbrs:
-            P.append('<table class="nbr-tbl"><tr><th>Switch</th><th>Local port</th>'
-                     '<th>Connected to</th><th>Remote port</th></tr>')
-            for sw, lp, nn, npp in nbrs:
-                P.append(f'<tr><td>{esc(sw)}</td><td class="mono">{esc(lp)}</td>'
-                         f'<td>{esc(nn)}</td><td class="mono">{esc(npp)}</td></tr>')
-            P.append('</table>')
-        P.append('</div></div></section>')
+        P.append(head("Network Topology", "from LLDP/SNMP · this broadcast domain"))
+
+        # Uplink — which switch/port this jack is plugged into (from LLDP/CDP).
+        if uplink:
+            bits = []
+            if uplink.get("switch_port"): bits.append(f"port <b>{esc(uplink['switch_port'])}</b>")
+            if uplink.get("vlan"): bits.append(f"VLAN {esc(uplink['vlan'])}")
+            if uplink.get("mgmt_ip"): bits.append(f"mgmt {esc(uplink['mgmt_ip'])}")
+            if uplink.get("poe"): bits.append("PoE")
+            P.append(f'<div class="uplink">🔌 This jack connects to <b>{esc(uplink.get("switch_name") or "a switch")}</b>'
+                     + (" · " + " · ".join(bits) if bits else "") + '</div>')
+
+        # Spanning tree — from the BPDUs on this segment.
+        if stp.get("present"):
+            root = stp.get("root") or {}
+            vlabel = {"rstp": "RSTP (802.1w)", "mstp": "MSTP (802.1s)", "stp": "STP (802.1D, legacy)"}.get(stp.get("version"), "STP")
+            where = "this switch is the root" if stp.get("is_root_here") else f"root is {esc(root.get('mac') or '?')}"
+            P.append(f'<div class="uplink">🌳 Spanning tree: <b>{esc(vlabel)}</b> · {where}'
+                     + (f" (priority {esc(root.get('priority'))})" if root.get("priority") is not None else "") + '</div>')
+        elif (uplink or svg) and "present" in stp:
+            P.append('<div class="uplink" style="color:var(--ink-3)">🌳 No spanning-tree BPDUs seen on this segment.</div>')
+
+        if svg:
+            P.append(f'<div class="topo">{svg}')
+            edges = net.get("snmp_devices", [])
+            nbrs = [(d.get("sysname") or d.get("ip"), nb.get("local_port"), nb.get("neighbor_name"), nb.get("neighbor_port"))
+                    for d in edges for nb in d.get("neighbors", [])]
+            if nbrs:
+                P.append('<table class="nbr-tbl"><tr><th>Switch</th><th>Local port</th>'
+                         '<th>Connected to</th><th>Remote port</th></tr>')
+                for sw, lp, nn, npp in nbrs:
+                    P.append(f'<tr><td>{esc(sw)}</td><td class="mono">{esc(lp)}</td>'
+                             f'<td>{esc(nn)}</td><td class="mono">{esc(npp)}</td></tr>')
+                P.append('</table>')
+            P.append('</div>')
+        P.append('</div></section>')
 
     # ── 05 WiFi ──
     wifi = model["wifi"]

@@ -114,7 +114,8 @@ anything that speaks the same POST.
 | Host + MAC sweep | `arp-scan` | active | every host, MAC → vendor |
 | Services / OS / shares | `nmap` (`-sV -O` + NSE) | active | open ports, OS guess, SMB shares, SNMP |
 | Passive host sniff | `tcpdump` | passive | hosts from ARP/DHCP without probing |
-| Switch / VLAN | `lldpctl`/`tcpdump` | both | switch name, port, VLAN (topology) |
+| Uplink (which port) | `lldpctl`/`tcpdump` | both | the switch + port this jack is on, plus VLAN / mgmt IP / PoE (LLDP/CDP) |
+| Spanning tree | `tcpdump` (BPDUs) | both | STP vs RSTP vs MSTP, root bridge + priority — flags legacy STP, untuned/rogue root, no-STP loop risk |
 | Service announce | `avahi-browse` | both | mDNS service types → device roles |
 | WiFi survey | `nmcli` | both | SSIDs, encryption, channel, signal |
 | DNS recon | `dig` | active | reverse-DNS host names + AXFR zone dump (full inventory if the DNS server allows it) |

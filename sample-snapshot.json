@@ -5,7 +5,7 @@
     "finished_at": "2026-07-18T14:11:20+00:00",
     "duration_seconds": 560,
     "mode": "active",
-    "collector_version": "0.2.0",
+    "collector_version": "0.2.1",
     "site_label": "Acme Dental (DEMO)",
     "location": "reception jack",
     "operator": "tzvi",
@@ -281,7 +281,10 @@
         "local_port": "eth0",
         "switch_name": "SW-CORE",
         "switch_port": "Gi1/0/1",
-        "vlan": null,
+        "port_descr": "Uplink",
+        "vlan": 1,
+        "mgmt_ip": "10.0.0.2",
+        "poe": true,
         "source": "lldpd"
       }
     ],
@@ -290,6 +293,20 @@
       "vendor": "Ubiquiti Inc",
       "identity": "UniFi Dream Machine Pro",
       "role_guess": "router/firewall"
+    },
+    "stp": {
+      "present": true,
+      "version": "stp",
+      "root": {
+        "priority": 32768,
+        "mac": "00:11:32:aa:bb:01"
+      },
+      "designated_bridge": {
+        "priority": 32768,
+        "mac": "18:e8:29:11:22:33"
+      },
+      "root_pathcost": 4,
+      "is_root_here": false
     },
     "snmp_devices": [
       {

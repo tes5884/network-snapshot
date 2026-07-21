@@ -341,6 +341,25 @@ def assess(snapshot, cats, host_cat):
             "domain controller), but worth confirming it's intentional.",
             scope_hint="Confirm the DHCP source and document it."))
 
+    # Spanning Tree posture.
+    stp = net.get("stp") or {}
+    switch_ct = len(net.get("snmp_devices") or []) + sum(1 for n in (net.get("lldp_neighbors") or []) if n.get("switch_name"))
+    if stp.get("present"):
+        if stp.get("version") == "stp":
+            findings.append(_finding("medium", "risk", "Legacy Spanning Tree (802.1D)",
+                "The switches run classic STP, which takes 30–50 seconds to recover from a link change (RSTP does it in under a second). Any failover causes a visible outage.",
+                scope_hint="Enable RSTP (802.1w) on the managed switches."))
+        root = stp.get("root") or {}
+        if root.get("priority") == 32768:
+            findings.append(_finding("medium", "risk", "STP root bridge left at default priority",
+                "The spanning-tree root uses the default priority (32768), so it's chosen by lowest MAC — non-deterministic, and a switch added later with a lower MAC can silently seize the root and destabilise the topology.",
+                hosts=[f"root {root.get('mac')} (priority {root.get('priority')})"],
+                scope_hint="Pin the root — set a low STP priority on the core switch (and a backup)."))
+    elif switch_ct >= 2:
+        findings.append(_finding("medium", "risk", "No Spanning Tree seen (loop risk)",
+            "Multiple switches are present but no STP/RSTP BPDUs were seen on this segment. If any redundant link exists, nothing prevents a bridging loop — one loop can broadcast-storm the whole network offline.",
+            scope_hint="Confirm STP/RSTP is enabled on every switch."))
+
     # DNS zone transfer.
     dns = net.get("dns") or {}
     if dns.get("axfr_open"):
