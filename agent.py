@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -93,16 +94,38 @@ def self_update():
         os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
+def monitor_ifaces():
+    """Wireless interfaces on this box that support monitor mode — so the
+    operator can pick one for a monitor-mode WiFi survey from the phone."""
+    out = []
+    try:
+        dev = subprocess.run(["iw", "dev"], capture_output=True, text=True, timeout=8).stdout
+        for w in re.findall(r"Interface (\S+)", dev):
+            info = subprocess.run(["iw", "dev", w, "info"], capture_output=True, text=True, timeout=5).stdout
+            phy = re.search(r"wiphy (\d+)", info)
+            if not phy:
+                continue
+            phyinfo = subprocess.run(["iw", "phy", f"phy{phy.group(1)}", "info"],
+                                     capture_output=True, text=True, timeout=5).stdout
+            # "Supported interface modes" block lists "* monitor" when capable
+            if re.search(r"^\s*\*\s*monitor\s*$", phyinfo, re.MULTILINE):
+                out.append(w)
+    except Exception:  # noqa: BLE001 - best-effort; no iw or no wifi is fine
+        pass
+    return sorted(set(out))
+
+
 def net_info():
     """Best-effort detection of the interface/CIDR/gateway we're plugged into,
-    reusing the collector's detector."""
+    reusing the collector's detector, plus any monitor-capable WiFi adapters."""
     try:
         sys.path.insert(0, str(HERE))
         import collect  # noqa: PLC0415
         iface = collect.detect_interface(None)
-        return {"interface": iface.get("name"), "cidr": iface.get("cidr"), "gateway": iface.get("gateway")}
+        return {"interface": iface.get("name"), "cidr": iface.get("cidr"),
+                "gateway": iface.get("gateway"), "wifi_ifaces": monitor_ifaces()}
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        return {"error": str(e), "wifi_ifaces": monitor_ifaces()}
 
 
 def enroll(conf, ident):
