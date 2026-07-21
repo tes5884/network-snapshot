@@ -833,46 +833,49 @@ def parse_airodump_csv(text: str) -> dict:
 
 
 def monitor_wifi(mon_iface: str, seconds: int) -> list[dict]:
-    """Put the adapter in monitor mode, capture with airodump-ng for `seconds`
-    (it channel-hops automatically), parse, and restore. UNTESTED against real
-    hardware — written for when the Alfa card arrives; degrades if tools/adapter
-    absent."""
-    if not (have("airodump-ng") and mon_iface):
+    """Put the adapter in monitor mode via iw, capture with airodump-ng for
+    `seconds` (it channel-hops automatically), parse, and restore to managed.
+
+    Uses iw directly rather than airmon-ng: airmon-ng renames the interface
+    (breaking the airodump target on some adapters) and `airmon-ng check kill`
+    tears down NetworkManager (breaking the managed-scan fallback). The iw path
+    keeps the interface name stable; NetworkManager is told to leave the adapter
+    alone for the duration instead. Verified on RTL8812AU (Alfa AWUS036ACH)."""
+    if not (have("airodump-ng") and mon_iface and have("iw")):
         return []
-    started_managed = False
-    dev = mon_iface
+    nm_released = False
     try:
-        if have("airmon-ng"):
-            run(["airmon-ng", "check", "kill"], 15)
-            rc, out, _ = run(["airmon-ng", "start", mon_iface], 20)
-            m = re.search(r"(monitor mode.*enabled.*?(\w+mon\w*|\w+))", out)
-            dev = (m.group(2) if m else mon_iface + "mon")
-            started_managed = True
-        else:
-            run(["ip", "link", "set", mon_iface, "down"], 10)
-            run(["iw", "dev", mon_iface, "set", "type", "monitor"], 10)
-            run(["ip", "link", "set", mon_iface, "up"], 10)
+        # Ask NetworkManager to stop managing this adapter so it doesn't fight
+        # the monitor-mode switch or reconnect mid-capture.
+        if have("nmcli"):
+            rc, _, _ = run(["nmcli", "dev", "set", mon_iface, "managed", "no"], 10)
+            nm_released = rc == 0
+        run(["ip", "link", "set", mon_iface, "down"], 10)
+        run(["iw", "dev", mon_iface, "set", "type", "monitor"], 10)
+        run(["ip", "link", "set", mon_iface, "up"], 10)
+        _, info, _ = run(["iw", "dev", mon_iface, "info"], 5)
+        if "type monitor" not in info:
+            return []  # adapter/driver refused monitor mode
         prefix = "/tmp/snapshot-wifi"
-        run(["rm", "-f"] + [prefix + s for s in ("-01.csv", "-01.cap")], 5)
-        # airodump runs until timeout; `run` kills it at the deadline.
-        run(["airodump-ng", "--output-format", "csv", "--write-interval", "1", "-w", prefix, dev],
+        run(["rm", "-f"] + [prefix + s for s in ("-01.csv", "-01.cap", "-01.kismet.csv",
+                                                 "-01.kismet.netxml", "-01.log.csv")], 5)
+        # airodump runs until timeout; `run` kills it at the deadline. It
+        # channel-hops on its own across the bands the adapter supports.
+        run(["airodump-ng", "--output-format", "csv", "--write-interval", "1", "-w", prefix, mon_iface],
             seconds + 3)
         try:
             with open(prefix + "-01.csv") as f:
-                parsed = parse_airodump_csv(f.read())
-            return parsed["aps"]
+                return parse_airodump_csv(f.read())["aps"]
         except FileNotFoundError:
             return []
     finally:
         # Restore managed mode so the laptop's WiFi works again.
-        if have("airmon-ng") and started_managed:
-            run(["airmon-ng", "stop", dev], 15)
-            if have("nmcli"):
-                run(["nmcli", "radio", "wifi", "on"], 10)
-        elif have("iw"):
-            run(["ip", "link", "set", dev, "down"], 10)
-            run(["iw", "dev", dev, "set", "type", "managed"], 10)
-            run(["ip", "link", "set", dev, "up"], 10)
+        run(["ip", "link", "set", mon_iface, "down"], 10)
+        if have("iw"):
+            run(["iw", "dev", mon_iface, "set", "type", "managed"], 10)
+        run(["ip", "link", "set", mon_iface, "up"], 10)
+        if nm_released and have("nmcli"):
+            run(["nmcli", "dev", "set", mon_iface, "managed", "yes"], 10)
 
 
 # ── Merge + assemble ─────────────────────────────────────────────────────────
