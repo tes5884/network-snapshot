@@ -404,6 +404,64 @@ def assess(snapshot, cats, host_cat):
             "Remote Desktop is open to the whole flat network — a common lateral-movement path once one host is compromised.",
             hosts=rdp, scope_hint="Restrict RDP to a management VLAN / jump host."))
 
+    # SMBv1 / unsigned SMB.
+    smbv1 = [f"{h.get('ipv4')} ({_name(h) or 'host'})" for h in hosts if (h.get("smb") or {}).get("smbv1")]
+    if smbv1:
+        findings.append(_finding("high", "risk", "SMBv1 still enabled",
+            "Hosts still speak SMBv1 — the protocol behind WannaCry/EternalBlue. It's obsolete and remotely exploitable and should be disabled everywhere.",
+            hosts=smbv1, scope_hint="Disable SMBv1 (SMB2/3 only) via GPO/config."))
+    unsigned = [f"{h.get('ipv4')} ({_name(h) or 'host'})" for h in hosts
+                if (h.get("smb") or {}).get("signing") in ("disabled", "not_required")]
+    if unsigned:
+        findings.append(_finding("medium", "risk", "SMB signing not required",
+            "SMB signing is off or optional — an attacker on the LAN can relay authentication to take over file servers or domain controllers (NTLM relay).",
+            hosts=unsigned, scope_hint="Require SMB signing on servers/DCs."))
+
+    # Exposed data / management services (several default to no auth).
+    SENSITIVE = {6379: "Redis", 27017: "MongoDB", 9200: "Elasticsearch", 11211: "Memcached",
+                 5984: "CouchDB", 5900: "VNC", 623: "IPMI/BMC"}
+    exposed = []
+    for h in hosts:
+        for p in h.get("open_ports", []):
+            svc = SENSITIVE.get(p.get("port"))
+            if svc:
+                exposed.append(f"{h.get('ipv4')} — {svc} :{p.get('port')}"
+                               + (" (confirmed no-auth)" if p.get("unauth") else ""))
+    if exposed:
+        findings.append(_finding("high", "risk", "Exposed data / management services",
+            "Databases or remote-access services are listening on the LAN — several default to no authentication. A wide-open database or screen-share is a direct data-theft / takeover path.",
+            hosts=exposed, scope_hint="Firewall these off, require auth, or move to a management segment."))
+
+    # Rogue IPv6 Router Advertisements.
+    ipv6 = net.get("ipv6_ra") or {}
+    if ipv6.get("count", 0) > 1:
+        findings.append(_finding("high", "risk", "Multiple IPv6 routers (rogue RA)",
+            f"{ipv6['count']} devices are advertising themselves as IPv6 routers on this segment. A rogue Router Advertisement is an IPv6 man-in-the-middle — it can silently reroute traffic even on an 'IPv4-only' network.",
+            hosts=ipv6.get("routers", []),
+            scope_hint="Enable RA Guard on the switches; find the rogue advertiser."))
+
+    # Duplicate / conflicting IPs.
+    dups = net.get("duplicate_ips") or []
+    if dups:
+        findings.append(_finding("medium", "risk", "Duplicate IP addresses (conflict)",
+            "The same IP answered from two different MACs — two devices are fighting over one address, causing intermittent connectivity for both.",
+            hosts=[f"{d['ip']} ← {', '.join(d.get('macs', []))}" for d in dups],
+            scope_hint="Fix the static/DHCP overlap causing the conflict."))
+
+    # Circuit health.
+    circ = net.get("circuit") or {}
+    if circ.get("double_nat"):
+        findings.append(_finding("medium", "risk", "Double NAT",
+            "There's a second router/NAT between the LAN and the ISP (a private hop past the gateway). Double NAT commonly breaks VoIP, VPNs, and port forwarding.",
+            hosts=circ.get("first_hops", [])[:4],
+            scope_hint="Bridge the ISP modem, or collapse to a single router."))
+    if circ.get("loss_pct", 0) >= 2:
+        findings.append(_finding("medium", "risk", "Internet packet loss",
+            f"{circ['loss_pct']:.0f}% packet loss to the internet"
+            + (f" (latency {circ.get('latency_ms')}ms, jitter {circ.get('jitter_ms')}ms)" if circ.get("latency_ms") else "")
+            + " — degrades calls/video and points at a circuit or gateway problem.",
+            scope_hint="Investigate the circuit / ISP; check for saturation or a failing gateway."))
+
     # ── Opportunities (onboarding scope drivers, not strictly risks) ──
     cam_n = len(cats.get("camera", []))
     if cam_n >= 3:

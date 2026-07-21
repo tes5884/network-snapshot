@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.3.0"
+COLLECTOR_VERSION = "0.4.0"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
@@ -60,10 +60,13 @@ REPO_WEB_URL = f"https://github.com/{REPO_SLUG}"
 FINGERPRINT_PORTS = (
     "21,22,23,25,53,80,110,111,135,139,143,161,443,445,515,554,587,631,"
     "993,995,1433,1521,1723,1883,2049,3128,3306,3389,5000,5060,5432,5900,"
-    "8000,8080,8443,8888,9100,32400,49152"
+    "5984,6379,8000,8080,8443,8888,9100,9200,11211,27017,32400,49152"
 )
-# NSE scripts that reveal roles/risks without being aggressive.
-NSE_SCRIPTS = "smb-os-discovery,smb-enum-shares,snmp-info,http-title,ssl-cert"
+# NSE scripts that reveal roles/risks without being aggressive. smb-protocols/
+# smb2-security-mode → SMBv1 + signing; redis/mongodb-info return data only when
+# the service is UNAUTHENTICATED (that's the finding).
+NSE_SCRIPTS = ("smb-os-discovery,smb-enum-shares,smb-protocols,smb2-security-mode,"
+               "snmp-info,http-title,ssl-cert,redis-info,mongodb-info")
 
 
 def now_iso() -> str:
@@ -108,6 +111,8 @@ TOOLS = [
     ("nbtscan", "nbtscan", "NetBIOS names + workgroup/domain", False),
     ("onesixtyone", "onesixtyone", "SNMP host + community discovery", False),
     ("speedtest-cli", "speedtest-cli", "WAN bandwidth (opt-in --speedtest)", False),
+    ("traceroute", "traceroute", "circuit path + double-NAT detection", False),
+    ("rdisc6", "ndisc6", "IPv6 rogue Router-Advertisement check", False),
 ]
 
 
@@ -196,17 +201,23 @@ def detect_interface(prefer: str | None) -> dict:
 
 # ── Active: arp-scan (fast L2 host + MAC + vendor) ───────────────────────────
 
-def run_arp_scan(iface: str) -> dict[str, dict]:
+def run_arp_scan(iface: str) -> tuple[dict[str, dict], list[dict]]:
+    """Returns (hosts, duplicate_ips). A duplicate = one IP answering from two
+    different MACs — a real IP conflict (intermittent connectivity for both)."""
     hosts: dict[str, dict] = {}
+    macs_by_ip: dict[str, set] = {}
     if not have("arp-scan"):
-        return hosts
+        return hosts, []
     rc, out, _ = run(["arp-scan", "--interface", iface, "--localnet", "--retry=2"], 120)
     for line in out.splitlines():
         m = re.match(r"^(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F:]{17})\s*(.*)$", line)
         if m:
-            ip, mac, vendor = m.group(1), m.group(2).lower(), m.group(3).strip()
+            ip, mac = m.group(1), m.group(2).lower()
+            vendor = re.sub(r"\s*\(DUP:\s*\d+\)", "", m.group(3)).strip()
+            macs_by_ip.setdefault(ip, set()).add(mac)
             hosts[ip] = {"mac": mac, "vendor": vendor or None, "discovered_by": ["arp"]}
-    return hosts
+    duplicates = [{"ip": ip, "macs": sorted(ms)} for ip, ms in macs_by_ip.items() if len(ms) > 1]
+    return hosts, duplicates
 
 
 # ── Active: nmap (services, OS, SMB shares, SNMP) ────────────────────────────
@@ -258,10 +269,12 @@ def run_nmap(target: str, timeout: int) -> dict[str, dict]:
                 for k_xml, k_out in (("name", "service"), ("product", "product"), ("version", "version")):
                     if svc.get(k_xml):
                         entry[k_out] = svc.get(k_xml)
-            # http title / ssl cert from NSE
+            # http title / ssl cert from NSE; redis/mongo info = unauthenticated
             for scr in p.findall("script"):
                 if scr.get("id") == "http-title" and scr.get("output"):
                     entry["title"] = scr.get("output").strip()
+                elif scr.get("id") in ("redis-info", "mongodb-info") and scr.get("output"):
+                    entry["unauth"] = True   # the info script only succeeds without auth
             ports.append(entry)
         if ports:
             rec["open_ports"] = ports
@@ -285,6 +298,15 @@ def run_nmap(target: str, timeout: int) -> dict[str, dict]:
             elif sid == "snmp-info" and sout:
                 rec.setdefault("snmp", {})["sysdescr"] = sout.splitlines()[0].strip()
                 rec["snmp"]["reachable"] = True
+            elif sid == "smb-protocols" and sout:
+                if re.search(r"SMBv1|NT LM 0\.12", sout):
+                    rec.setdefault("smb", {})["smbv1"] = True
+            elif sid == "smb2-security-mode" and sout:
+                low = sout.lower()
+                rec.setdefault("smb", {})["signing"] = (
+                    "disabled" if "disabled" in low
+                    else "not_required" if "not required" in low
+                    else "required" if "required" in low else "unknown")
         hosts[ip] = rec
     return hosts
 
@@ -926,6 +948,59 @@ def dhcp_probe(iface: str | None = None) -> dict:
     return {"servers": servers, "count": len(servers)}
 
 
+def _is_private(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except ValueError:
+        return False
+
+
+def circuit_health() -> dict:
+    """Internet-circuit quality: packet loss / latency / jitter to a public
+    anchor, plus double-NAT detection from the first traceroute hops. Low-
+    profile — a short ping + a shallow trace, both outbound (never touches LAN
+    hosts)."""
+    out: dict = {}
+    _, o, _ = run(["ping", "-n", "-c", "20", "-i", "0.2", "-W", "1", "8.8.8.8"], 30)
+    if o:
+        m = re.search(r"(\d+(?:\.\d+)?)% packet loss", o)
+        if m:
+            out["loss_pct"] = float(m.group(1))
+        r = re.search(r"=\s*[\d.]+/([\d.]+)/[\d.]+/([\d.]+)", o)
+        if r:
+            out["latency_ms"] = round(float(r.group(1)), 1)
+            out["jitter_ms"] = round(float(r.group(2)), 1)
+    if have("traceroute"):
+        _, t, _ = run(["traceroute", "-n", "-w", "1", "-q", "1", "-m", "6", "8.8.8.8"], 30)
+        hops = re.findall(r"^\s*\d+\s+((?:\d{1,3}\.){3}\d{1,3})", t or "", re.M)
+        lead = 0
+        for hop in hops:
+            if _is_private(hop):
+                lead += 1
+            else:
+                break
+        out["first_hops"] = hops[:5]
+        out["private_lead_hops"] = lead
+        out["double_nat"] = lead >= 2
+    return out
+
+
+def ipv6_ra(iface: str, seconds: int, passive: bool) -> dict:
+    """Detect IPv6 Router Advertisements. >1 distinct router = rogue RA — an
+    IPv6 man-in-the-middle path (the twin of rogue DHCP). rdisc6 solicits
+    (active); tcpdump just listens (passive-safe)."""
+    routers: set = set()
+    if iface and have("rdisc6") and not passive:
+        _, o, _ = run(["rdisc6", "-1", "-w", "3000", iface], 12)
+        for m in re.finditer(r"from\s+(fe80::[0-9a-f:]+)", o or "", re.I):
+            routers.add(m.group(1).lower())
+    if iface and not routers and have("tcpdump"):
+        _, o, _ = run(["tcpdump", "-i", iface, "-c", "4", "-nn", "-l", "icmp6", "and", "ip6[40]==134"], min(seconds, 12) + 5)
+        for m in re.finditer(r"(fe80::[0-9a-f:]+)\s*>\s*\S+:\s*ICMP6, router advertisement", o or "", re.I):
+            routers.add(m.group(1).lower())
+    return {"present": bool(routers), "routers": sorted(routers), "count": len(routers)}
+
+
 def collect(args) -> dict:
     started = time.time()
     started_iso = now_iso()
@@ -949,9 +1024,10 @@ def collect(args) -> dict:
             return None
 
     arp = nmap = {}
+    duplicate_ips: list = []
     if not args.passive and iface:
         log("arp-scan…")
-        arp = step("arp_scan", lambda: run_arp_scan(iface)) or {}
+        arp, duplicate_ips = step("arp_scan", lambda: run_arp_scan(iface)) or ({}, [])
         target = iface_info.get("cidr") or ""
         if target:
             log(f"nmap {target} (fingerprint ports + NSE)… this is the slow part")
@@ -1036,6 +1112,11 @@ def collect(args) -> dict:
             wan.update({k: v for k, v in st.items() if v is not None})
     wan = wan or None
 
+    # IPv6 rogue-RA (listen — passive-safe) + circuit health run in both modes.
+    ipv6 = (step("ipv6_ra", lambda: ipv6_ra(iface, args.listen, args.passive)) if iface else None) or {"present": False}
+    log("Circuit health (loss/latency + double-NAT)…")
+    circuit = step("circuit", circuit_health) or {}
+
     # Gateway / firewall identity — combine host record + any SNMP identity.
     gw_host = next((h for h in hosts if h["ipv4"] == gw), None)
     gw_snmp = next((d for d in snmp["devices"] if d["ip"] == gw), None)
@@ -1099,6 +1180,9 @@ def collect(args) -> dict:
             "dns": dns,
             "netbios": netbios,
             "dhcp": dhcp,
+            "duplicate_ips": duplicate_ips,
+            "ipv6_ra": ipv6,
+            "circuit": circuit,
             "wan": wan,
         },
         "wifi": wifi,
@@ -1131,7 +1215,7 @@ def demo_snapshot() -> dict:
              "os_guess": {"name": "VMware ESXi 7.0", "accuracy": 92}, "open_ports": [{"port": 443, "proto": "tcp", "service": "https", "title": "VMware ESXi"}, {"port": 902, "proto": "tcp", "service": "vmware-auth"}]},
             {"ipv4": "10.0.0.20", "mac": "00:11:32:aa:bb:01", "vendor": "Synology", "hostname": "NAS01", "discovered_by": ["arp", "nmap"],
              "open_ports": [{"port": 445, "proto": "tcp", "service": "microsoft-ds"}, {"port": 5001, "proto": "tcp", "service": "https", "title": "Synology DSM"}],
-             "smb": {"os": "Windows 6.1", "shares": [{"name": "public", "anonymous": True, "access": "READ"}, {"name": "backups", "anonymous": True, "access": "WRITE"}]}},
+             "smb": {"os": "Windows 6.1", "smbv1": True, "signing": "not_required", "shares": [{"name": "public", "anonymous": True, "access": "READ"}, {"name": "backups", "anonymous": True, "access": "WRITE"}]}},
             {"ipv4": "10.0.0.31", "mac": "ac:cc:8e:11:00:01", "vendor": "Axis Communications", "hostname": "AXIS-lobby", "discovered_by": ["arp", "nmap", "mdns"],
              "open_ports": [{"port": 554, "proto": "tcp", "service": "rtsp"}, {"port": 80, "proto": "tcp", "service": "http", "title": "AXIS Login"}], "mdns_services": ["_rtsp._tcp"]},
             {"ipv4": "10.0.0.32", "mac": "ac:cc:8e:11:00:02", "vendor": "Axis Communications", "hostname": "AXIS-hall", "discovered_by": ["arp", "nmap"],
@@ -1139,7 +1223,7 @@ def demo_snapshot() -> dict:
             {"ipv4": "10.0.0.40", "mac": "3c:2a:f4:00:aa:01", "vendor": "Brother", "hostname": "BRN3C2AF4", "discovered_by": ["arp", "mdns"],
              "open_ports": [{"port": 9100, "proto": "tcp", "service": "jetdirect"}, {"port": 631, "proto": "tcp", "service": "ipp"}], "mdns_services": ["_ipp._tcp", "_pdl-datastream._tcp"]},
             {"ipv4": "10.0.0.55", "mac": "b8:27:eb:00:00:aa", "vendor": "Raspberry Pi Foundation", "hostname": "unknown-pi", "discovered_by": ["arp", "nmap"],
-             "os_guess": {"name": "Linux", "accuracy": 88}, "open_ports": [{"port": 80, "proto": "tcp", "service": "http", "title": "DVR WebViewer"}]},
+             "os_guess": {"name": "Linux", "accuracy": 88}, "open_ports": [{"port": 80, "proto": "tcp", "service": "http", "title": "DVR WebViewer"}, {"port": 6379, "proto": "tcp", "service": "redis", "unauth": True}]},
             {"ipv4": "10.0.0.101", "mac": "f0:9f:c2:00:00:01", "vendor": "Dell", "hostname": "DESKTOP-A1B2C3", "discovered_by": ["arp", "nmap"],
              "os_guess": {"name": "Microsoft Windows 10", "accuracy": 96}, "open_ports": [{"port": 3389, "proto": "tcp", "service": "ms-wbt-server"}, {"port": 445, "proto": "tcp", "service": "microsoft-ds"}]},
             {"ipv4": "10.0.0.150", "mac": "00:04:f2:00:00:aa", "vendor": "Polycom", "hostname": "phone-reception", "discovered_by": ["arp"],
@@ -1180,6 +1264,9 @@ def demo_snapshot() -> dict:
                 {"server": "10.0.0.1", "offered_ip": "10.0.0.55", "router": "10.0.0.1", "dns": "10.0.0.1"},
                 {"server": "10.0.0.240", "offered_ip": "10.0.0.88", "router": "10.0.0.240", "dns": "8.8.8.8"},
             ]},
+            "duplicate_ips": [{"ip": "10.0.0.44", "macs": ["00:1a:2b:3c:4d:5e", "aa:bb:cc:dd:ee:ff"]}],
+            "ipv6_ra": {"present": True, "count": 2, "routers": ["fe80::1", "fe80::dead:beef"]},
+            "circuit": {"loss_pct": 0.0, "latency_ms": 14.0, "jitter_ms": 3.0, "double_nat": True, "private_lead_hops": 2, "first_hops": ["10.0.0.1", "192.168.100.1", "203.0.113.1"]},
             "wan": {"public_ip": "203.0.113.47", "download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "Optimum", "geo": "New York, NY", "server": "New York, NY"},
         },
         "wifi": [

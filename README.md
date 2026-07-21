@@ -112,7 +112,10 @@ anything that speaks the same POST.
 |------|------|------|-------|
 | Interface detect | `ip`/`route` | both | which NIC, IP, subnet, gateway |
 | Host + MAC sweep | `arp-scan` | active | every host, MAC → vendor |
-| Services / OS / shares | `nmap` (`-sV -O` + NSE) | active | open ports, OS guess, SMB shares, SNMP |
+| Services / OS / shares | `nmap` (`-sV -O` + NSE) | active | open ports, OS guess, SMB shares, SNMP, **SMBv1 + SMB signing**, **exposed no-auth services** (Redis/Mongo/Elastic/VNC…) |
+| IPv6 rogue RA | `rdisc6`/`tcpdump` | both | IPv6 Router Advertisements — >1 = rogue RA (IPv6 MITM) |
+| Duplicate IPs | `arp-scan` | active | one IP answering from two MACs = an address conflict |
+| Circuit health | `ping`/`traceroute` | both | packet loss / latency / jitter + **double-NAT** detection |
 | Passive host sniff | `tcpdump` | passive | hosts from ARP/DHCP without probing |
 | Uplink (which port) | `lldpctl`/`tcpdump` | both | the switch + port this jack is on, plus VLAN / mgmt IP / PoE (LLDP/CDP) |
 | Spanning tree | `tcpdump` (BPDUs) | both | STP vs RSTP vs MSTP, root bridge + priority — flags legacy STP, untuned/rogue root, no-STP loop risk |

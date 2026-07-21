@@ -5,7 +5,7 @@
     "finished_at": "2026-07-18T14:11:20+00:00",
     "duration_seconds": 560,
     "mode": "active",
-    "collector_version": "0.2.1",
+    "collector_version": "0.3.0",
     "site_label": "Acme Dental (DEMO)",
     "location": "reception jack",
     "operator": "tzvi",
@@ -117,6 +117,8 @@
       ],
       "smb": {
         "os": "Windows 6.1",
+        "smbv1": true,
+        "signing": "not_required",
         "shares": [
           {
             "name": "public",
@@ -225,6 +227,12 @@
           "proto": "tcp",
           "service": "http",
           "title": "DVR WebViewer"
+        },
+        {
+          "port": 6379,
+          "proto": "tcp",
+          "service": "redis",
+          "unauth": true
         }
       ]
     },
@@ -420,6 +428,35 @@
           "router": "10.0.0.240",
           "dns": "8.8.8.8"
         }
+      ]
+    },
+    "duplicate_ips": [
+      {
+        "ip": "10.0.0.44",
+        "macs": [
+          "00:1a:2b:3c:4d:5e",
+          "aa:bb:cc:dd:ee:ff"
+        ]
+      }
+    ],
+    "ipv6_ra": {
+      "present": true,
+      "count": 2,
+      "routers": [
+        "fe80::1",
+        "fe80::dead:beef"
+      ]
+    },
+    "circuit": {
+      "loss_pct": 0.0,
+      "latency_ms": 14.0,
+      "jitter_ms": 3.0,
+      "double_nat": true,
+      "private_lead_hops": 2,
+      "first_hops": [
+        "10.0.0.1",
+        "192.168.100.1",
+        "203.0.113.1"
       ]
     },
     "wan": {

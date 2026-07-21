@@ -533,7 +533,9 @@ def render(model, narrative_md=None):
     # A 0 Mbps download means the speed test failed, not a real circuit — treat
     # it as "not measured" so the report never shows a misleading zero.
     has_speed = bool(wan.get("download_mbps"))
-    if wan.get("public_ip") or has_speed:
+    circ = net.get("circuit") or {}
+    has_circuit = circ.get("loss_pct") is not None or bool(circ.get("first_hops"))
+    if wan.get("public_ip") or has_speed or has_circuit:
         server = wan.get("server")
         hint = " · ".join(x for x in [wan.get("isp"), wan.get("geo")] if x)
         P.append('<section><div class="pad">')
@@ -544,6 +546,15 @@ def render(model, narrative_md=None):
                      f'<div class="v mono">{esc(wan["public_ip"])}</div>'
                      + (f'<div class="o">{esc(wan.get("isp"))}</div>' if wan.get("isp") else "")
                      + '</div>')
+        # Circuit health — loss / latency / jitter + double-NAT.
+        if has_circuit:
+            parts = []
+            if circ.get("loss_pct") is not None: parts.append(f"{circ['loss_pct']:.0f}% loss")
+            if circ.get("latency_ms") is not None: parts.append(f"{circ['latency_ms']:.0f}ms latency")
+            if circ.get("jitter_ms") is not None: parts.append(f"{circ['jitter_ms']:.0f}ms jitter")
+            if circ.get("double_nat"): parts.append("⚠ double-NAT")
+            if parts:
+                P.append(f'<div class="uplink">📶 Circuit health: {esc(" · ".join(parts))}</div>')
         if has_speed:
             P.append('<div class="wan-cards">')
             cards = [
