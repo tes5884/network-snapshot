@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.4.3"
+COLLECTOR_VERSION = "0.5.0"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
@@ -113,6 +113,7 @@ TOOLS = [
     ("speedtest-cli", "speedtest-cli", "WAN bandwidth (opt-in --speedtest)", False),
     ("traceroute", "traceroute", "circuit path + double-NAT detection", False),
     ("rdisc6", "ndisc6", "IPv6 rogue Router-Advertisement check", False),
+    ("whois", "whois", "WAN static/dynamic guess + ISP netblock", False),
 ]
 
 
@@ -994,6 +995,104 @@ def circuit_health() -> dict:
     return out
 
 
+# Tokens ISPs bake into the reverse DNS of DYNAMIC residential pools.
+_DYN_RDNS_TOKENS = ("dyn", "dynamic", "pool", "dhcp", "cpe", "dsl", "cable",
+                    "res", "broadband", "wireless", "ppp", "static-is-not-here")
+
+
+def _whois_field(text: str, keys: list[str]) -> str | None:
+    for key in keys:
+        m = re.search(rf"^{re.escape(key)}\s*:\s*(.+)$", text, re.I | re.M)
+        if m and m.group(1).strip():
+            return m.group(1).strip()
+    return None
+
+
+def _cidr_prefix(cidr: str | None) -> int | None:
+    if not cidr:
+        return None
+    m = re.search(r"/(\d+)", cidr)
+    return int(m.group(1)) if m else None
+
+
+def wan_intel(ip: str, circuit: dict) -> dict:
+    """Best-effort read on the WAN address: reverse DNS + whois → a static-vs-
+    dynamic *guess* (not a guarantee from one scan), the ISP netblock/subnet +
+    org, and the ISP-side gateway (first public traceroute hop). All outbound,
+    low-profile — never touches the LAN."""
+    out: dict = {}
+    reasons: list[str] = []
+    static_score = dynamic_score = 0
+
+    # Reverse DNS (PTR)
+    if have("dig"):
+        _, o, _ = run(["dig", "+short", "+time=3", "+tries=1", "-x", ip], 8)
+        rdns = (o or "").strip().splitlines()[0].rstrip(".") if o and o.strip() else None
+        if rdns:
+            out["rdns"] = rdns
+            low = rdns.lower()
+            if re.search(r"static|business|biz\b|dedicated", low):
+                static_score += 2
+                reasons.append(f"rDNS '{rdns}' names a static/business assignment")
+            elif any(t in low for t in _DYN_RDNS_TOKENS):
+                dynamic_score += 2
+                reasons.append(f"rDNS '{rdns}' matches a dynamic-pool naming pattern")
+            else:
+                reasons.append(f"rDNS '{rdns}' is neutral")
+        else:
+            static_score += 1
+            reasons.append("no reverse DNS on the public IP (mild static hint)")
+
+    # WHOIS → netblock CIDR, org, reassignment
+    if have("whois"):
+        _, w, _ = run(["whois", ip], 20)
+        w = w or ""
+        cidr = _whois_field(w, ["CIDR", "route", "route6"])
+        netrange = _whois_field(w, ["NetRange", "inetnum"])
+        netname = _whois_field(w, ["netname", "NetName"])
+        org = _whois_field(w, ["OrgName", "org-name", "Organization", "owner", "descr"])
+        custname = _whois_field(w, ["CustName", "Customer"])
+        nettype = _whois_field(w, ["NetType"])
+        if cidr:
+            out["netblock"] = cidr
+        elif netrange:
+            out["netblock"] = netrange
+        if org:
+            out["org"] = org
+        if netname:
+            out["netname"] = netname
+        prefix = _cidr_prefix(cidr)
+        reassigned = bool(custname) or bool(nettype and "reassign" in nettype.lower())
+        out["reassigned"] = reassigned
+        if prefix is not None and prefix >= 28:
+            static_score += 2
+            reasons.append(f"WHOIS block {cidr} is small (/{prefix}) — typical of a static allocation")
+        if reassigned:
+            static_score += 2
+            reasons.append(f"WHOIS block reassigned to a customer ({custname or netname or org})")
+        elif prefix is not None and prefix <= 20:
+            dynamic_score += 1
+            reasons.append(f"WHOIS block {cidr} is a large ISP pool (/{prefix}) — leans dynamic")
+
+    # Verdict
+    diff = static_score - dynamic_score
+    if diff >= 2:
+        out["assignment"], out["assignment_confidence"] = "static", ("high" if static_score >= 4 else "medium")
+    elif diff <= -2:
+        out["assignment"], out["assignment_confidence"] = "dynamic", ("high" if dynamic_score >= 4 else "medium")
+    else:
+        out["assignment"], out["assignment_confidence"] = "unknown", "low"
+    out["assignment_reasons"] = reasons
+
+    # ISP-side gateway = first PUBLIC traceroute hop
+    hops = (circuit or {}).get("first_hops") or []
+    lead = (circuit or {}).get("private_lead_hops") or 0
+    if len(hops) > lead:
+        out["isp_gateway"] = hops[lead]
+
+    return out
+
+
 def ipv6_ra(iface: str, seconds: int, passive: bool) -> dict:
     """Detect IPv6 Router Advertisements. >1 distinct router = rogue RA — an
     IPv6 man-in-the-middle path (the twin of rogue DHCP). rdisc6 solicits
@@ -1125,6 +1224,12 @@ def collect(args) -> dict:
     ipv6 = (step("ipv6_ra", lambda: ipv6_ra(iface, args.listen, args.passive)) if iface else None) or {"present": False}
     log("Circuit health (loss/latency + double-NAT)…")
     circuit = step("circuit", circuit_health) or {}
+
+    # WAN address intel: static-vs-dynamic guess + netblock/org + ISP gateway.
+    if wan and wan.get("public_ip"):
+        log("WAN intel (rDNS + whois → static/dynamic, netblock, gateway)…")
+        intel = step("wan_intel", lambda: wan_intel(wan["public_ip"], circuit)) or {}
+        wan.update(intel)
 
     # Gateway / firewall identity — combine host record + any SNMP identity.
     gw_host = next((h for h in hosts if h["ipv4"] == gw), None)
@@ -1276,7 +1381,11 @@ def demo_snapshot() -> dict:
             "duplicate_ips": [{"ip": "10.0.0.44", "macs": ["00:1a:2b:3c:4d:5e", "aa:bb:cc:dd:ee:ff"]}],
             "ipv6_ra": {"present": True, "count": 2, "routers": ["fe80::1", "fe80::dead:beef"]},
             "circuit": {"loss_pct": 0.0, "latency_ms": 14.0, "jitter_ms": 3.0, "double_nat": True, "private_lead_hops": 2, "first_hops": ["10.0.0.1", "192.168.100.1", "203.0.113.1"]},
-            "wan": {"public_ip": "203.0.113.47", "download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "Optimum", "geo": "New York, NY", "server": "New York, NY"},
+            "wan": {"public_ip": "203.0.113.47", "download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "AS6128 Optimum", "geo": "New York, NY", "server": "New York, NY",
+                    "rdns": "biz-203-0-113-47.static.example.net", "netblock": "203.0.113.40/29", "org": "Acme Widgets LLC", "netname": "ACME-STATIC", "reassigned": True,
+                    "assignment": "static", "assignment_confidence": "high",
+                    "assignment_reasons": ["rDNS 'biz-203-0-113-47.static.example.net' names a static/business assignment", "WHOIS block 203.0.113.40/29 is small (/29) — typical of a static allocation", "WHOIS block reassigned to a customer (Acme Widgets LLC)"],
+                    "isp_gateway": "203.0.113.1"},
         },
         "wifi": [
             {"ssid": "Acme-Corp", "bssid": "B8:27:EB:1A:2B:01", "channel": 36, "band": "5GHz", "security": "WPA2", "signal": 82},

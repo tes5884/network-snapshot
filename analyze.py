@@ -488,6 +488,22 @@ def assess(snapshot, cats, host_cat):
             + " — degrades calls/video and points at a circuit or gateway problem.",
             scope_hint="Investigate the circuit / ISP; check for saturation or a failing gateway."))
 
+    # WAN address type — a scoping fact, not a risk.
+    wan = net.get("wan") or {}
+    asg = wan.get("assignment")
+    if asg == "static":
+        detail = "The public IP looks static"
+        if wan.get("netblock"):
+            detail += f" (block {wan['netblock']}"
+            detail += f", {wan['org']})" if wan.get("org") else ")"
+        findings.append(_finding("info", "opportunity", "Static public IP",
+            detail + " — supports reliable remote access, hosted services, site-to-site VPN, and firewall allow-listing without dynamic-DNS.",
+            scope_hint="Static WAN = candidate for hosted services / VPN / strict inbound rules."))
+    elif asg == "dynamic":
+        findings.append(_finding("info", "opportunity", "Dynamic public IP",
+            "The public IP looks dynamic (ISP pool) — it can change, so anything that relies on a fixed WAN address (VPN, port-forwards, allow-lists) needs dynamic-DNS or a static-IP upgrade.",
+            scope_hint="Dynamic WAN — price a static-IP add-on if remote access / VPN is in scope."))
+
     # ── Opportunities (onboarding scope drivers, not strictly risks) ──
     cam_n = len(cats.get("camera", []))
     if cam_n >= 3:

@@ -5,7 +5,7 @@
     "finished_at": "2026-07-18T14:11:20+00:00",
     "duration_seconds": 560,
     "mode": "active",
-    "collector_version": "0.4.3",
+    "collector_version": "0.5.0",
     "site_label": "Acme Dental (DEMO)",
     "location": "reception jack",
     "operator": "tzvi",
@@ -464,9 +464,22 @@
       "download_mbps": 187.4,
       "upload_mbps": 21.6,
       "ping_ms": 12.3,
-      "isp": "Optimum",
+      "isp": "AS6128 Optimum",
       "geo": "New York, NY",
-      "server": "New York, NY"
+      "server": "New York, NY",
+      "rdns": "biz-203-0-113-47.static.example.net",
+      "netblock": "203.0.113.40/29",
+      "org": "Acme Widgets LLC",
+      "netname": "ACME-STATIC",
+      "reassigned": true,
+      "assignment": "static",
+      "assignment_confidence": "high",
+      "assignment_reasons": [
+        "rDNS 'biz-203-0-113-47.static.example.net' names a static/business assignment",
+        "WHOIS block 203.0.113.40/29 is small (/29) \u2014 typical of a static allocation",
+        "WHOIS block reassigned to a customer (Acme Widgets LLC)"
+      ],
+      "isp_gateway": "203.0.113.1"
     }
   },
   "wifi": [

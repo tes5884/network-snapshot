@@ -689,6 +689,30 @@ def render(model, narrative_md=None):
                      f'<div class="v mono">{esc(wan["public_ip"])}</div>'
                      + (f'<div class="o">{esc(wan.get("isp"))}</div>' if wan.get("isp") else "")
                      + '</div>')
+        # WAN address intel — static/dynamic guess + netblock/subnet + ISP gateway.
+        asg = wan.get("assignment")
+        if asg or wan.get("netblock") or wan.get("isp_gateway"):
+            rows = []
+            if asg:
+                col = {"static": "#5a7a3e", "dynamic": "#c77b1a"}.get(asg, "#69727f")
+                lbl = {"static": "Static (likely)", "dynamic": "Dynamic (likely)", "unknown": "Undetermined"}.get(asg, asg)
+                conf = wan.get("assignment_confidence")
+                rows.append(("Assignment", f'<b style="color:{col}">{esc(lbl)}</b>'
+                             + (f' <span style="color:#9aa3af;font-size:11px">({esc(conf)} confidence)</span>' if conf else "")))
+            if wan.get("netblock"): rows.append(("WAN subnet", f'<code>{esc(wan["netblock"])}</code>'))
+            if wan.get("org"): rows.append(("Registered to", esc(wan.get("org"))))
+            if wan.get("isp_gateway"): rows.append(("ISP gateway", f'<code>{esc(wan["isp_gateway"])}</code>'))
+            if wan.get("rdns"): rows.append(("Reverse DNS", f'<code>{esc(wan["rdns"])}</code>'))
+            body = "".join(
+                '<div style="display:flex;gap:10px;padding:3px 0">'
+                f'<span style="width:112px;flex:none;color:var(--ink-3,#69727f);font-size:12px">{k}</span>'
+                f'<span style="font-size:13px;overflow-wrap:anywhere">{v}</span></div>' for k, v in rows)
+            reasons = wan.get("assignment_reasons") or []
+            reasons_html = (f'<div style="margin-top:8px;font-size:11px;color:var(--ink-3,#69727f)">'
+                            f'Why: {esc(" · ".join(reasons))}</div>') if reasons else ""
+            P.append('<div style="margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:12px 14px">'
+                     '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3,#69727f);margin-bottom:6px">WAN details</div>'
+                     f'{body}{reasons_html}</div>')
         # Circuit health — loss / latency / jitter + double-NAT.
         if has_circuit:
             parts = []
