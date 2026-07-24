@@ -699,6 +699,8 @@ def render(model, narrative_md=None):
                 conf = wan.get("assignment_confidence")
                 rows.append(("Assignment", f'<b style="color:{col}">{esc(lbl)}</b>'
                              + (f' <span style="color:#9aa3af;font-size:11px">({esc(conf)} confidence)</span>' if conf else "")))
+            if wan.get("changed_from"):
+                rows.append(("⚠ Changed", f'<b style="color:#c77b1a">now {esc(wan.get("public_ip"))}, was {esc(wan["changed_from"])} last scan — the WAN IP is dynamic</b>'))
             if wan.get("netblock"): rows.append(("WAN subnet", f'<code>{esc(wan["netblock"])}</code>'))
             if wan.get("org"): rows.append(("Registered to", esc(wan.get("org"))))
             if wan.get("isp_gateway"): rows.append(("ISP gateway", f'<code>{esc(wan["isp_gateway"])}</code>'))
