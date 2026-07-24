@@ -693,6 +693,11 @@ def render(model, narrative_md=None):
         asg = wan.get("assignment")
         if asg or wan.get("netblock") or wan.get("isp_gateway"):
             rows = []
+            isp = wan.get("isp")
+            if isp:
+                m = re.match(r"^(AS\d+)\s+(.+)$", isp)  # ipinfo "AS6128 Optimum"
+                rows.append(("ISP", (f'{esc(m.group(2))} <span style="color:#9aa3af;font-size:11px">({esc(m.group(1))})</span>'
+                                     if m else esc(isp))))
             if asg:
                 col = {"static": "#5a7a3e", "dynamic": "#c77b1a"}.get(asg, "#69727f")
                 lbl = {"static": "Static (likely)", "dynamic": "Dynamic (likely)", "unknown": "Undetermined"}.get(asg, asg)
@@ -703,6 +708,7 @@ def render(model, narrative_md=None):
                 rows.append(("⚠ Changed", f'<b style="color:#c77b1a">now {esc(wan.get("public_ip"))}, was {esc(wan["changed_from"])} last scan — the WAN IP is dynamic</b>'))
             if wan.get("netblock"): rows.append(("WAN subnet", f'<code>{esc(wan["netblock"])}</code>'))
             if wan.get("org"): rows.append(("Registered to", esc(wan.get("org"))))
+            if wan.get("customer"): rows.append(("Reassigned to", esc(wan.get("customer"))))
             if wan.get("isp_gateway"): rows.append(("ISP gateway", f'<code>{esc(wan["isp_gateway"])}</code>'))
             if wan.get("rdns"): rows.append(("Reverse DNS", f'<code>{esc(wan["rdns"])}</code>'))
             body = "".join(

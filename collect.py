@@ -1059,6 +1059,8 @@ def wan_intel(ip: str, circuit: dict) -> dict:
             out["netblock"] = netrange
         if org:
             out["org"] = org
+        if custname:
+            out["customer"] = custname
         if netname:
             out["netname"] = netname
         prefix = _cidr_prefix(cidr)
@@ -1382,7 +1384,7 @@ def demo_snapshot() -> dict:
             "ipv6_ra": {"present": True, "count": 2, "routers": ["fe80::1", "fe80::dead:beef"]},
             "circuit": {"loss_pct": 0.0, "latency_ms": 14.0, "jitter_ms": 3.0, "double_nat": True, "private_lead_hops": 2, "first_hops": ["10.0.0.1", "192.168.100.1", "203.0.113.1"]},
             "wan": {"public_ip": "203.0.113.47", "download_mbps": 187.4, "upload_mbps": 21.6, "ping_ms": 12.3, "isp": "AS6128 Optimum", "geo": "New York, NY", "server": "New York, NY",
-                    "rdns": "biz-203-0-113-47.static.example.net", "netblock": "203.0.113.40/29", "org": "Acme Widgets LLC", "netname": "ACME-STATIC", "reassigned": True,
+                    "rdns": "biz-203-0-113-47.static.example.net", "netblock": "203.0.113.40/29", "org": "Optimum Online", "customer": "Acme Widgets LLC", "netname": "ACME-STATIC", "reassigned": True,
                     "assignment": "static", "assignment_confidence": "high",
                     "assignment_reasons": ["rDNS 'biz-203-0-113-47.static.example.net' names a static/business assignment", "WHOIS block 203.0.113.40/29 is small (/29) — typical of a static allocation", "WHOIS block reassigned to a customer (Acme Widgets LLC)"],
                     "isp_gateway": "203.0.113.1"},
