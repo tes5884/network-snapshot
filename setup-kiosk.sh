@@ -65,7 +65,7 @@ Environment=WAYLAND_DISPLAY=wayland-0
 # default.target. Linger starts the user manager well before the compositor and
 # the kiosk server, so wait for both — and exit NON-ZERO on timeout, so
 # Restart=always retries instead of launching the browser into a blank page.
-ExecStartPre=/bin/sh -c 'for i in \$(seq 1 120); do [ -S "\$XDG_RUNTIME_DIR/wayland-0" ] && curl -sf -o /dev/null http://127.0.0.1:$PORT/ && exit 0; sleep 1; done; echo "compositor or kiosk server not ready" >&2; exit 1'
+ExecStartPre=/bin/sh -c 'for i in \$(seq 1 120); do if [ -S "\$XDG_RUNTIME_DIR/wayland-0" ] && curl -sf -o /dev/null http://127.0.0.1:$PORT/; then if [ -x /usr/bin/wf-panel-pi ] && ! pgrep -x wf-panel-pi >/dev/null; then sleep 1; continue; fi; sleep 6; exit 0; fi; sleep 1; done; echo "compositor or kiosk server not ready" >&2; exit 1'
 ExecStart=$BROWSER \\
   --ozone-platform=wayland \\
   --kiosk --app=http://127.0.0.1:$PORT/ \\
