@@ -89,11 +89,14 @@ DESKTOP_DIR="$(sudo -u "$KIOSK_USER" xdg-user-dir DESKTOP 2>/dev/null || true)"
 [[ -z "$DESKTOP_DIR" || "$DESKTOP_DIR" == "$USER_HOME" ]] && DESKTOP_DIR="$USER_HOME/Desktop"
 install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$DESKTOP_DIR"
 printf '%s\n' "$DESKTOP_ENTRY" > "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
-# The file manager only launches a desktop .desktop file that is executable;
-# without this it opens it in a text editor instead.
-chmod +x "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
+# Deliberately NOT executable. PCManFM (the Pi/LXDE file manager) parses a
+# .desktop file as a launcher on its own; marking it executable instead makes it
+# a "script", and activating it then prompts Execute / Execute in Terminal /
+# Cancel every time. GNOME's file manager wants the opposite — this targets the
+# Pi desktop.
+chmod 644 "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
 chown "$KIOSK_USER:$KIOSK_USER" "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
-# pcmanfm keeps its own trust flag; set it where the attr is supported.
+# Harmless where unsupported; GNOME-style file managers use this to trust it.
 sudo -u "$KIOSK_USER" gio set "$DESKTOP_DIR/netsnapshot-kiosk.desktop" \
   metadata::trusted true >/dev/null 2>&1 || true
 
