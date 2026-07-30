@@ -18,6 +18,17 @@ export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 
 log() { echo "[kiosk-browser] $*" >&2; }
 
+# Only ever one launcher. Every instance wipes the shared Chromium profile on
+# start, so a second one (a double-tap on the desktop launcher, or autostart
+# racing a manual start) pulls the profile out from under the running browser
+# and leaves a blank window with no way back.
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/netsnapshot-kiosk.lock"
+exec 9>"$LOCK" || true
+if command -v flock >/dev/null && ! flock -n 9; then
+  log "kiosk already running — nothing to do"
+  exit 0
+fi
+
 # The compositor and the kiosk server both come up after this service can
 # start, so wait for each rather than racing them.
 for _ in $(seq 1 120); do
@@ -33,15 +44,19 @@ if ! curl -sf -o /dev/null "http://127.0.0.1:$PORT/"; then
   log "kiosk server not answering on $PORT"; exit 1
 fi
 
-# On the Pi desktop the panel and file manager map at the same moment; let the
-# session settle so the kiosk window isn't opened underneath them.
-if [ -x /usr/bin/wf-panel-pi ]; then
+# At boot the panel and file manager map at the same moment, and a kiosk window
+# opened right then can land underneath them — so wait for the session and let
+# it settle. Started by hand from the desktop the session is already up, and
+# waiting 5s there just makes the launcher feel broken.
+SETTLE=1
+if [ -x /usr/bin/wf-panel-pi ] && ! pgrep -x wf-panel-pi >/dev/null; then
+  SETTLE=5
   for _ in $(seq 1 60); do
     pgrep -x wf-panel-pi >/dev/null && break
     sleep 1
   done
 fi
-sleep 5
+sleep "$SETTLE"
 
 # Always start clean: a wedged profile renders a permanently blank window and
 # there is no state here worth keeping.
