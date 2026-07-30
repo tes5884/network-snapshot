@@ -62,7 +62,7 @@ touch "$AUTOSTART"
 sed -i '/# --- netsnapshot kiosk ---/,/# --- end netsnapshot kiosk ---/d' "$AUTOSTART"
 cat >> "$AUTOSTART" <<EOF
 $MARK
-KIOSK_PORT=$PORT $HERE/kiosk-browser.sh >/tmp/kiosk-browser.log 2>&1 &
+KIOSK_PORT=$PORT /bin/bash $HERE/kiosk-browser.sh >/tmp/kiosk-browser.log 2>&1 &
 # --- end netsnapshot kiosk ---
 EOF
 chown "$KIOSK_USER:$KIOSK_USER" "$AUTOSTART"
@@ -74,7 +74,7 @@ DESKTOP_ENTRY="[Desktop Entry]
 Type=Application
 Name=Network Snapshot Kiosk
 Comment=Open the touchscreen scanning UI
-Exec=env KIOSK_PORT=$PORT $HERE/kiosk-browser.sh
+Exec=env KIOSK_PORT=$PORT /bin/bash $HERE/kiosk-browser.sh
 Icon=utilities-system-monitor
 Terminal=false
 Categories=System;"
