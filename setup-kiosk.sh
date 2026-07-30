@@ -44,7 +44,10 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now netsnapshot-kiosk.service
+systemctl enable netsnapshot-kiosk.service
+# restart, not `enable --now`: on a re-run the service is already up and would
+# otherwise keep serving the old code.
+systemctl restart netsnapshot-kiosk.service
 
 echo "==> installing browser user service"
 # A user service rather than a bare autostart line: it restarts the browser if
