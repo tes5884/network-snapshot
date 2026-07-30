@@ -8,3 +8,6 @@ __pycache__/
 submit.conf
 agent.conf
 agent-identity.json
+
+# kiosk scan output + rendered report
+scans/
