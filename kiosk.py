@@ -407,6 +407,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/scan":
             self._json(JOB.snapshot())
         elif path == "/report":
+            # Kiosk mode has no browser chrome, so a bare report page would be a
+            # dead end. Wrap it with a back bar and iframe the real thing.
+            if not os.path.exists(REPORT_PATH):
+                self._send(404, b"no report yet", "text/plain")
+                return
+            self._send(200, REPORT_SHELL.encode(), "text/html; charset=utf-8")
+        elif path == "/report/raw":
             if not os.path.exists(REPORT_PATH):
                 self._send(404, b"no report yet", "text/plain")
                 return
@@ -736,9 +743,11 @@ async function pollScan(){
     $("run-step").textContent = j.line || "working…";
     $("run-tail").innerHTML = (j.log||[]).slice(-6).reverse()
       .map(l => "<div>"+l.replace(/[<&]/g, c => c === "<" ? "&lt;" : "&amp;")+"</div>").join("");
-  } else if (j.state === "done" && lastState !== "done"){
-    renderResult(j);
-    show("done");
+  } else if (j.state === "done"){
+    if (lastState !== "done"){ renderResult(j); show("done"); }
+    // The report renders in the background after the scan finishes, so keep
+    // re-checking — on transition alone the button would stay disabled forever.
+    $("btn-report").disabled = !j.report_ready;
   } else if ((j.state === "failed" || j.state === "cancelled") && lastState !== j.state){
     if (j.state === "failed"){ $("fail-msg").textContent = j.error || "unknown error"; show("fail"); }
     else show("idle");
@@ -814,6 +823,34 @@ poll(); pollScan();
 setInterval(poll, 5000);
 setInterval(pollScan, 1000);
 </script>
+</body>
+</html>
+"""
+
+
+REPORT_SHELL = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Report</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d1117;overflow:hidden}
+  .bar{
+    height:64px;display:flex;align-items:center;gap:14px;padding:0 14px;
+    background:#161b22;border-bottom:1px solid #2a323d;
+    font:600 19px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#e8edf3
+  }
+  .bar button{
+    min-height:46px;padding:0 20px;border-radius:12px;border:1px solid #2a323d;
+    background:#1c232c;color:#e8edf3;font:700 18px system-ui,sans-serif
+  }
+  iframe{width:100%;height:calc(100% - 64px);border:0;background:#fff}
+</style>
+</head>
+<body>
+  <div class="bar"><button onclick="location.href='/'">← Back</button><span>Scan report</span></div>
+  <iframe src="/report/raw"></iframe>
 </body>
 </html>
 """
