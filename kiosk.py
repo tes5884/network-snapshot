@@ -328,6 +328,9 @@ class ScanJob:
         return True
 
 
+_SEV_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
+
+
 def summarize(snapshot_path: str) -> dict:
     """Post-scan headline numbers, straight from the shared analyzer."""
     import analyze  # local import: only needed once a scan finishes
@@ -346,7 +349,10 @@ def summarize(snapshot_path: str) -> dict:
         "severity": sev,
         "categories": [{"name": k, "count": v} for k, v in top],
         "site": (model.get("scan") or {}).get("site_label"),
-        "headline": [f.get("title") for f in findings if f.get("severity") == "high"][:3],
+        # Top findings by severity rather than high-only: a clean scan would
+        # otherwise show an empty panel and tell the operator nothing.
+        "headline": [{"severity": f.get("severity"), "title": f.get("title")}
+                     for f in sorted(findings, key=lambda f: _SEV_ORDER.get(f.get("severity"), 9))][:4],
         "file": os.path.basename(snapshot_path),
         "submitted": False,   # set by the caller from the collector's log
     }
@@ -531,8 +537,16 @@ PAGE = r"""<!doctype html>
   .cats{display:flex;flex-wrap:wrap;gap:7px}
   .cat{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:15px}
   .cat b{color:var(--acc)}
-  .flags{margin:0;padding-left:20px;font-size:15.5px;line-height:1.65}
-  .flags li{margin-bottom:3px}
+  .flags{margin:0;padding:0;list-style:none;font-size:16px;line-height:1.5}
+  .flags li{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .flags li:last-child{border-bottom:0}
+  .sev{
+    flex:0 0 auto;min-width:64px;text-align:center;border-radius:6px;padding:3px 8px;
+    font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px
+  }
+  .sev.high{background:rgba(218,54,51,.2);color:#ff8a84}
+  .sev.medium{background:rgba(210,153,34,.18);color:#e3b341}
+  .sev.low,.sev.info{background:var(--panel2);color:var(--dim)}
   .banner{border-radius:12px;padding:10px 13px;font-size:15px;font-weight:600}
   .banner.ok{background:rgba(46,160,67,.15);color:#7ee092;border:1px solid rgba(46,160,67,.4)}
   .banner.warn{background:rgba(210,153,34,.13);color:#e3b341;border:1px solid rgba(210,153,34,.4)}
@@ -623,7 +637,7 @@ PAGE = r"""<!doctype html>
     </div>
     <div class="banner" id="r-upload"></div>
     <div class="card" id="r-flagcard">
-      <h2>Needs attention</h2>
+      <h2>Findings</h2>
       <ul class="flags" id="r-flags"></ul>
     </div>
     <div class="card">
@@ -632,7 +646,7 @@ PAGE = r"""<!doctype html>
     </div>
   </div>
   <div class="rowbtns">
-    <button class="big ghost" id="btn-report">📄 Report</button>
+    <button class="big ghost" id="btn-report">View report</button>
     <button class="big" id="btn-done">✓ Done</button>
   </div>
 </div>
@@ -641,7 +655,7 @@ PAGE = r"""<!doctype html>
 <div class="screen" id="s-fail">
   <header><span class="host">Scan failed</span></header>
   <div class="runwrap">
-    <div style="font-size:66px">⚠️</div>
+    <div style="font-size:66px;color:var(--bad)">!</div>
     <div class="step" id="fail-msg">—</div>
   </div>
   <div class="rowbtns">
@@ -744,12 +758,13 @@ function renderResult(j){
 
   const up = $("r-upload");
   if (r.submitted){ up.className = "banner ok"; up.textContent = "✓ Uploaded to TEQhub — assign it to a client there"; }
-  else if (r.submit_failed){ up.className = "banner bad"; up.textContent = "⚠ Upload failed — saved here: " + (r.file || "snapshot.json"); }
+  else if (r.submit_failed){ up.className = "banner bad"; up.textContent = "Upload failed — saved here: " + (r.file || "snapshot.json"); }
   else { up.className = "banner warn"; up.textContent = "Saved on this device: " + (r.file || "snapshot.json"); }
 
   const flags = r.headline || [];
   $("r-flagcard").style.display = flags.length ? "" : "none";
-  $("r-flags").innerHTML = flags.map(f => "<li>"+f+"</li>").join("");
+  $("r-flags").innerHTML = flags.map(f =>
+    '<li><span class="sev '+(f.severity||"low")+'">'+(f.severity||"low")+'</span>'+f.title+'</li>').join("");
   $("r-cats").innerHTML = (r.categories||[])
     .map(c => '<span class="cat"><b>'+c.count+'</b> '+c.name+'</span>').join("");
   $("btn-report").disabled = !j.report_ready;
