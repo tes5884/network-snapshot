@@ -363,7 +363,36 @@ JOB = ScanJob()
 
 # ── Power ────────────────────────────────────────────────────────────────────
 
+STOP_FLAG = os.path.join(HERE, ".kiosk-stop")
+
+
+def exit_to_desktop() -> bool:
+    """Close the kiosk window and leave the Pi usable as a normal desktop.
+
+    The launcher relaunches the browser whenever it exits, so killing it alone
+    would just bring the kiosk straight back. Drop a flag the launcher checks
+    first. It lives in the repo dir (owned by the kiosk user) rather than /tmp,
+    which is sticky — a root-owned flag there could not be cleared on relaunch."""
+    try:
+        with open(STOP_FLAG, "w") as fh:
+            fh.write("stop\n")
+        # The launcher runs as the desktop user; let it clean up its own flag.
+        try:
+            st = os.stat(HERE)
+            os.chown(STOP_FLAG, st.st_uid, st.st_gid)
+        except (OSError, AttributeError):
+            pass
+    except OSError as e:
+        log(f"could not write stop flag: {e}")
+        return False
+    # -x matches the process name exactly, so this can't match the kiosk itself.
+    subprocess.run(["pkill", "-x", "chromium"], capture_output=True)
+    return True
+
+
 def power_action(what: str) -> bool:
+    if what == "exit":
+        return exit_to_desktop()
     cmd = {"reboot": ["systemctl", "reboot"], "poweroff": ["systemctl", "poweroff"]}.get(what)
     if not cmd:
         return False
@@ -675,6 +704,7 @@ PAGE = r"""<!doctype html>
 <div class="modal" id="m-power">
   <div class="sheet">
     <h3>Power</h3>
+    <button class="big ghost" id="btn-exit">✕ Close kiosk (use the desktop)</button>
     <button class="big ghost" id="btn-reboot">↻ Restart</button>
     <button class="big danger" id="btn-off">⏻ Shut down</button>
     <button class="big ghost" id="btn-pcancel">Cancel</button>
@@ -818,6 +848,12 @@ $("btn-reboot").addEventListener("click", () => fetch("/api/power",{method:"POST
   headers:{"Content-Type":"application/json"}, body:'{"action":"reboot"}'}));
 $("btn-off").addEventListener("click", () => fetch("/api/power",{method:"POST",
   headers:{"Content-Type":"application/json"}, body:'{"action":"poweroff"}'}));
+$("btn-exit").addEventListener("click", () => {
+  // The window is about to be closed underneath us; say so in case it lingers.
+  $("btn-exit").textContent = "Closing…";
+  fetch("/api/power",{method:"POST", headers:{"Content-Type":"application/json"},
+    body:'{"action":"exit"}'});
+});
 
 poll(); pollScan();
 setInterval(poll, 5000);

@@ -67,6 +67,21 @@ KIOSK_PORT=$PORT $HERE/kiosk-browser.sh >/tmp/kiosk-browser.log 2>&1 &
 EOF
 chown "$KIOSK_USER:$KIOSK_USER" "$AUTOSTART"
 
+# Desktop entry so the kiosk can be reopened after "Close kiosk" without a reboot.
+APPS="$USER_HOME/.local/share/applications"
+install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$APPS"
+cat > "$APPS/netsnapshot-kiosk.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Network Snapshot Kiosk
+Comment=Open the touchscreen scanning UI
+Exec=env KIOSK_PORT=$PORT $HERE/kiosk-browser.sh
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;
+EOF
+chown -R "$KIOSK_USER:$KIOSK_USER" "$USER_HOME/.local/share/applications"
+
 # Remove the user service from earlier installs — it never worked under linger
 # and would fight the autostart launch.
 if [[ -f "$USER_HOME/.config/systemd/user/kiosk-browser.service" ]]; then

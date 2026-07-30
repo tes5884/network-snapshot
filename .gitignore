@@ -11,3 +11,6 @@ agent-identity.json
 
 # kiosk scan output + rendered report
 scans/
+
+# kiosk "close" flag
+.kiosk-stop

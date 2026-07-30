@@ -48,6 +48,11 @@ sleep 5
 rm -rf "$PROFILE"
 
 log "starting $BROWSER on $WAYLAND_DISPLAY"
+# "Close kiosk" in the UI drops this flag before killing the browser; without it
+# the restart loop below would immediately bring the kiosk back.
+STOP_FLAG="$(dirname "$0")/.kiosk-stop"
+rm -f "$STOP_FLAG"
+
 # Relaunch if it exits, so a crash doesn't leave a dead screen in the field.
 while true; do
   "$BROWSER" \
@@ -58,7 +63,13 @@ while true; do
     --check-for-update-interval=31536000 \
     --password-store=basic \
     --user-data-dir="$PROFILE"
-  log "browser exited ($?) — restarting"
+  rc=$?
+  if [ -e "$STOP_FLAG" ]; then
+    rm -f "$STOP_FLAG"
+    log "closed from the UI — leaving the desktop up"
+    exit 0
+  fi
+  log "browser exited ($rc) — restarting"
   rm -rf "$PROFILE"
   sleep 3
 done
