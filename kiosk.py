@@ -163,9 +163,8 @@ def status_payload() -> dict:
         "mac": iface_info.get("mac"),
         "link": link_state(iface_info.get("name")),
         "public_ip": wan.get("public_ip"),
-        "isp": wan.get("isp") or wan.get("org"),
-        "city": wan.get("city"),
-        "region": wan.get("region"),
+        "isp": wan.get("isp"),
+        "geo": wan.get("geo"),
         "monitor_ifaces": monitor_ifaces(iface_info.get("name")),
         "submit_url": submit_target(),
         "collector_version": collect.COLLECTOR_VERSION,
@@ -689,7 +688,9 @@ async function poll(){
     $("k-gw").textContent    = dash(st.gateway);
     $("k-pub").textContent   = dash(st.public_ip);
     $("k-isp").textContent   = dash(st.isp);
-    $("k-loc").textContent   = dash([st.city, st.region].filter(Boolean).join(", "));
+    $("k-loc").textContent   = dash(st.geo);
+    // An empty row is just wasted panel on a 5" screen — drop it until it fills.
+    $("k-loc").parentElement.style.display = st.geo ? "" : "none";
 
     const lk = st.link || {};
     let linktxt = "—";

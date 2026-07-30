@@ -46,36 +46,54 @@ EOF
 systemctl daemon-reload
 systemctl enable --now netsnapshot-kiosk.service
 
-echo "==> writing labwc autostart"
-install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$USER_HOME/.config/labwc"
-AUTOSTART="$USER_HOME/.config/labwc/autostart"
-MARK="# --- netsnapshot kiosk ---"
-# Drop any previous block so re-runs don't stack duplicate launches.
-if [[ -f "$AUTOSTART" ]] && grep -qF "$MARK" "$AUTOSTART"; then
-  sed -i "/$(printf '%s' "$MARK" | sed 's/[][\/.*^$]/\\&/g')/,/# --- end netsnapshot kiosk ---/d" "$AUTOSTART"
-fi
-cat >> "$AUTOSTART" <<EOF
-$MARK
-# Wait for the kiosk server to answer before opening the browser.
-( for i in \$(seq 1 30); do
-    curl -sf -o /dev/null http://127.0.0.1:$PORT/ && break
-    sleep 1
-  done
-  $BROWSER \\
-    --ozone-platform=wayland \\
-    --kiosk --app=http://127.0.0.1:$PORT/ \\
-    --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
-    --disable-features=TranslateUI --overscroll-history-navigation=0 \\
-    --check-for-update-interval=31536000 \\
-    --user-data-dir=$USER_HOME/.config/netsnapshot-kiosk-chrome ) &
-# --- end netsnapshot kiosk ---
+echo "==> installing browser user service"
+# A user service rather than a bare autostart line: it restarts the browser if
+# it crashes, and `systemctl --user restart kiosk-browser` reloads the UI
+# without touching the session.
+install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$USER_HOME/.config/systemd/user"
+cat > "$USER_HOME/.config/systemd/user/kiosk-browser.service" <<EOF
+[Unit]
+Description=Network Snapshot kiosk browser
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=WAYLAND_DISPLAY=wayland-0
+ExecStartPre=/bin/sh -c 'for i in \$(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:$PORT/ && exit 0; sleep 1; done; exit 0'
+ExecStart=$BROWSER \\
+  --ozone-platform=wayland \\
+  --kiosk --app=http://127.0.0.1:$PORT/ \\
+  --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
+  --disable-features=TranslateUI --overscroll-history-navigation=0 \\
+  --check-for-update-interval=31536000 \\
+  --user-data-dir=$USER_HOME/.config/netsnapshot-kiosk-chrome
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
 EOF
-chown "$KIOSK_USER:$KIOSK_USER" "$AUTOSTART"
-chmod +x "$AUTOSTART" 2>/dev/null || true
+chown -R "$KIOSK_USER:$KIOSK_USER" "$USER_HOME/.config/systemd"
+
+# The user manager needs to be running to enable this; loginctl enable-linger
+# makes it come up at boot even before the graphical session settles.
+loginctl enable-linger "$KIOSK_USER" || true
+sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$KIOSK_USER")" \
+  systemctl --user daemon-reload || true
+sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$KIOSK_USER")" \
+  systemctl --user enable kiosk-browser.service || true
+
+# Older installs put the launch in labwc's autostart — remove it so the browser
+# doesn't open twice.
+AUTOSTART="$USER_HOME/.config/labwc/autostart"
+if [[ -f "$AUTOSTART" ]] && grep -qF "# --- netsnapshot kiosk ---" "$AUTOSTART"; then
+  sed -i '/# --- netsnapshot kiosk ---/,/# --- end netsnapshot kiosk ---/d' "$AUTOSTART"
+fi
 
 echo
 echo "==> done"
 systemctl --no-pager --lines=3 status netsnapshot-kiosk.service || true
 echo
 echo "UI:      http://127.0.0.1:$PORT/"
-echo "Browser: reboot, or run the autostart block manually to open it now."
+echo "Browser: systemctl --user start kiosk-browser   (or just reboot)"
