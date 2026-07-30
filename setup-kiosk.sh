@@ -57,13 +57,14 @@ install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$USER_HOME/.config/systemd/user"
 cat > "$USER_HOME/.config/systemd/user/kiosk-browser.service" <<EOF
 [Unit]
 Description=Network Snapshot kiosk browser
-After=graphical-session.target
-PartOf=graphical-session.target
 
 [Service]
 Type=simple
 Environment=WAYLAND_DISPLAY=wayland-0
-ExecStartPre=/bin/sh -c 'for i in \$(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:$PORT/ && exit 0; sleep 1; done; exit 0'
+# graphical-session.target is not reached under labwc+lightdm, so this hangs off
+# default.target and waits for the compositor socket and the kiosk server itself
+# to exist. Restart=always covers the case where either takes longer than this.
+ExecStartPre=/bin/sh -c 'for i in \$(seq 1 60); do [ -S "\$XDG_RUNTIME_DIR/wayland-0" ] && curl -sf -o /dev/null http://127.0.0.1:$PORT/ && exit 0; sleep 1; done; exit 0'
 ExecStart=$BROWSER \\
   --ozone-platform=wayland \\
   --kiosk --app=http://127.0.0.1:$PORT/ \\
@@ -75,17 +76,23 @@ Restart=always
 RestartSec=3
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target
 EOF
 chown -R "$KIOSK_USER:$KIOSK_USER" "$USER_HOME/.config/systemd"
 
 # The user manager needs to be running to enable this; loginctl enable-linger
 # makes it come up at boot even before the graphical session settles.
 loginctl enable-linger "$KIOSK_USER" || true
-sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$KIOSK_USER")" \
-  systemctl --user daemon-reload || true
-sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$KIOSK_USER")" \
-  systemctl --user enable kiosk-browser.service || true
+KUID="$(id -u "$KIOSK_USER")"
+# Talk to the *running* user manager — a plain `sudo -u` shell has no bus and
+# the enable silently lands in the wrong place.
+run_user() {
+  sudo -u "$KIOSK_USER" \
+    XDG_RUNTIME_DIR="/run/user/$KUID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$KUID/bus" "$@"
+}
+run_user systemctl --user daemon-reload || true
+run_user systemctl --user reenable kiosk-browser.service || true
 
 # Older installs put the launch in labwc's autostart — remove it so the browser
 # doesn't open twice.
