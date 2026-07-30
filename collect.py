@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-COLLECTOR_VERSION = "0.5.0"
+COLLECTOR_VERSION = "0.5.1"
 SCHEMA_VERSION = "1.0"
 
 # GitHub is the source of truth — every run checks for a newer version first.
@@ -89,7 +89,15 @@ def run(cmd: list[str], timeout: int) -> tuple[int, str, str]:
     except FileNotFoundError:
         return -1, "", "not found"
     except subprocess.TimeoutExpired as e:
-        return -1, e.stdout or "", "timeout"
+        # text=True does NOT apply to TimeoutExpired.stdout — Python decodes only
+        # on the normal completion path, so this comes back as bytes. Every step
+        # that deliberately runs until timeout (passive sniff, LLDP, STP, mDNS,
+        # monitor-mode wifi) lands here, and a regex over bytes then dies with
+        # "cannot use a string pattern on a bytes-like object".
+        out = e.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        return -1, out, "timeout"
     except Exception as e:  # noqa: BLE001
         return -1, "", str(e)
 
