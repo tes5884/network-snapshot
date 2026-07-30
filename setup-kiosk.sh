@@ -62,6 +62,7 @@ $MARK
     sleep 1
   done
   $BROWSER \\
+    --ozone-platform=wayland \\
     --kiosk --app=http://127.0.0.1:$PORT/ \\
     --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
     --disable-features=TranslateUI --overscroll-history-navigation=0 \\

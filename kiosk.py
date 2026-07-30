@@ -469,10 +469,14 @@ PAGE = r"""<!doctype html>
   .body{flex:1;display:flex;gap:12px;min-height:0}
   .col{display:flex;flex-direction:column;gap:12px;min-height:0}
   .col.info{flex:1.15}
-  .col.act{flex:1;justify-content:center}
+  .col.act{flex:1}
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
   .card h2{margin:0 0 10px;font-size:13px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);font-weight:700}
+  /* Fill the panel height instead of leaving dead space under the cards —
+     it also spreads the rows out, which reads better at arm's length. */
+  .col.info .card{flex:1;display:flex;flex-direction:column}
+  .col.info .card .kv{flex:1;align-items:center}
 
   .kv{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
   .kv:last-child{border-bottom:0}
@@ -488,14 +492,15 @@ PAGE = r"""<!doctype html>
     background:var(--acc);color:#fff;font-size:27px;font-weight:800;letter-spacing:.4px;
     display:flex;align-items:center;justify-content:center;gap:12px
   }
+  #btn-scan{flex:1;font-size:38px}   /* the one thing you tap — give it the room */
   .big:active{transform:scale(.98)}
   .big.ghost{background:var(--panel2);color:var(--tx);border:1px solid var(--line);font-size:21px;font-weight:700;min-height:68px}
   .big.danger{background:var(--bad)}
   .big[disabled]{opacity:.45}
 
-  .opts{display:flex;gap:10px}
+  .opts{display:flex;gap:10px;flex:0 0 auto}
   .chip{
-    flex:1;min-height:62px;border-radius:14px;border:1px solid var(--line);
+    flex:1;min-height:78px;border-radius:14px;border:1px solid var(--line);
     background:var(--panel2);color:var(--dim);font-size:16px;font-weight:700;
     display:flex;align-items:center;justify-content:center;gap:8px;padding:0 8px;text-align:center
   }
@@ -561,11 +566,13 @@ PAGE = r"""<!doctype html>
         <div class="kv"><span class="k">IP address</span><span class="v mono" id="k-ip">—</span></div>
         <div class="kv"><span class="k">Subnet</span><span class="v mono" id="k-cidr">—</span></div>
         <div class="kv"><span class="k">Gateway</span><span class="v mono" id="k-gw">—</span></div>
+        <div class="kv"><span class="k">Link</span><span class="v" id="k-link">—</span></div>
       </div>
       <div class="card">
         <h2>Internet</h2>
         <div class="kv"><span class="k">Public IP</span><span class="v mono" id="k-pub">—</span></div>
         <div class="kv"><span class="k">Provider</span><span class="v sm" id="k-isp">—</span></div>
+        <div class="kv"><span class="k">Location</span><span class="v sm" id="k-loc">—</span></div>
       </div>
     </div>
 
@@ -673,9 +680,7 @@ async function poll(){
     const up = st.online;
     $("netdot").className = "dot " + (up ? "up" : "down");
     let label = up ? "Online" : "No internet";
-    if (st.link && st.link.ssid) label += " · " + st.link.ssid;
-    else if (st.link && st.link.speed_mbps) label += " · " + st.link.speed_mbps + "M";
-    else if (st.link && st.link.carrier === false) label = "Cable unplugged";
+    if (st.link && st.link.carrier === false) label = "Cable unplugged";
     $("netlabel").textContent = label;
 
     $("k-iface").textContent = dash(st.iface);
@@ -683,8 +688,16 @@ async function poll(){
     $("k-cidr").textContent  = dash(st.cidr);
     $("k-gw").textContent    = dash(st.gateway);
     $("k-pub").textContent   = dash(st.public_ip);
-    const place = [st.city, st.region].filter(Boolean).join(", ");
-    $("k-isp").textContent   = st.isp ? (st.isp + (place ? " · " + place : "")) : "—";
+    $("k-isp").textContent   = dash(st.isp);
+    $("k-loc").textContent   = dash([st.city, st.region].filter(Boolean).join(", "));
+
+    const lk = st.link || {};
+    let linktxt = "—";
+    if (lk.carrier === false) linktxt = "unplugged";
+    else if (lk.ssid) linktxt = "WiFi · " + lk.ssid;
+    else if (lk.speed_mbps) linktxt = (lk.speed_mbps >= 1000 ? (lk.speed_mbps/1000)+" Gb" : lk.speed_mbps+" Mb") + " wired";
+    else if (lk.carrier) linktxt = "connected";
+    $("k-link").textContent = linktxt;
 
     monIface = (st.monitor_ifaces && st.monitor_ifaces[0]) || null;
     $("opt-mon").disabled = !monIface;
