@@ -360,6 +360,11 @@ def summarize(snapshot_path: str) -> dict:
 
 JOB = ScanJob()
 
+# When the UI last actually talked to us. Chromium can be alive with a window
+# that never maps, or a blank page — in both cases nothing polls, and the
+# launcher uses this to notice and restart the browser.
+LAST_UI_SEEN = 0.0
+
 
 # ── Power ────────────────────────────────────────────────────────────────────
 
@@ -428,9 +433,17 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, default=str).encode(), "application/json")
 
     def do_GET(self) -> None:
+        global LAST_UI_SEEN
         path = self.path.split("?", 1)[0]
+        if path in ("/", "/api/status", "/api/scan"):
+            # A rendering page polls these constantly. A browser that is running
+            # but showing nothing does not, which is what the launcher watches.
+            LAST_UI_SEEN = time.time()
         if path == "/":
             self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+        elif path == "/api/ui-alive":
+            # Plain integer: the launcher reads this from a shell script.
+            self._send(200, str(int(time.time() - LAST_UI_SEEN)).encode(), "text/plain")
         elif path == "/api/status":
             self._json(status_payload())
         elif path == "/api/scan":

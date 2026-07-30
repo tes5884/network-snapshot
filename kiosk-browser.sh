@@ -68,23 +68,59 @@ log "starting $BROWSER on $WAYLAND_DISPLAY"
 STOP_FLAG="$(dirname "$0")/.kiosk-stop"
 rm -f "$STOP_FLAG"
 
+# Has the page actually rendered? A live UI polls the server constantly, so the
+# server's idea of when it last heard from a page is the only honest signal —
+# Chromium can sit there alive with an unmapped window or a blank page, and
+# process checks all look fine.
+ui_stale_seconds() {
+  curl -sf --max-time 3 "http://127.0.0.1:$PORT/api/ui-alive" 2>/dev/null || echo 9999
+}
+
+stop_requested() {
+  [ -e "$STOP_FLAG" ] && { rm -f "$STOP_FLAG"; return 0; }
+  return 1
+}
+
 # Relaunch if it exits, so a crash doesn't leave a dead screen in the field.
 while true; do
+  rm -rf "$PROFILE"
   "$BROWSER" \
     --ozone-platform=wayland \
     --kiosk --app="http://127.0.0.1:$PORT/" \
     --noerrdialogs --disable-infobars --disable-session-crashed-bubble \
-    --overscroll-history-navigation=0 \
+    --no-first-run --overscroll-history-navigation=0 \
     --check-for-update-interval=31536000 \
     --password-store=basic \
-    --user-data-dir="$PROFILE"
-  rc=$?
-  if [ -e "$STOP_FLAG" ]; then
-    rm -f "$STOP_FLAG"
-    log "closed from the UI — leaving the desktop up"
-    exit 0
+    --user-data-dir="$PROFILE" &
+  BPID=$!
+
+  # Give it up to ~75s to show a page, then treat it as failed to render.
+  rendered=0
+  for _ in $(seq 1 15); do
+    sleep 5
+    stop_requested && { kill "$BPID" 2>/dev/null; log "closed from the UI"; exit 0; }
+    kill -0 "$BPID" 2>/dev/null || break          # died on its own
+    [ "$(ui_stale_seconds)" -lt 20 ] && { rendered=1; break; }
+  done
+
+  if [ "$rendered" = 1 ]; then
+    log "UI is live"
+    # Healthy: sit on it, and keep checking that it stays live.
+    while kill -0 "$BPID" 2>/dev/null; do
+      sleep 10
+      stop_requested && { kill "$BPID" 2>/dev/null; log "closed from the UI"; exit 0; }
+      if [ "$(ui_stale_seconds)" -gt 60 ]; then
+        log "UI went silent — restarting browser"
+        kill "$BPID" 2>/dev/null; sleep 2; break
+      fi
+    done
+  else
+    log "browser never rendered — restarting"
+    kill "$BPID" 2>/dev/null
   fi
-  log "browser exited ($rc) — restarting"
-  rm -rf "$PROFILE"
-  sleep 3
+
+  sleep 2
+  pkill -x chromium 2>/dev/null   # reap any stragglers holding the profile
+  stop_requested && { log "closed from the UI"; exit 0; }
+  sleep 2
 done
