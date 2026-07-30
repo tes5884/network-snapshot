@@ -67,20 +67,35 @@ KIOSK_PORT=$PORT $HERE/kiosk-browser.sh >/tmp/kiosk-browser.log 2>&1 &
 EOF
 chown "$KIOSK_USER:$KIOSK_USER" "$AUTOSTART"
 
-# Desktop entry so the kiosk can be reopened after "Close kiosk" without a reboot.
-APPS="$USER_HOME/.local/share/applications"
-install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$APPS"
-cat > "$APPS/netsnapshot-kiosk.desktop" <<EOF
-[Desktop Entry]
+# Launcher so the kiosk can be reopened after "Close kiosk" without a reboot —
+# in the app menu, and as an icon on the desktop where it's actually findable
+# on a touchscreen.
+DESKTOP_ENTRY="[Desktop Entry]
 Type=Application
 Name=Network Snapshot Kiosk
 Comment=Open the touchscreen scanning UI
 Exec=env KIOSK_PORT=$PORT $HERE/kiosk-browser.sh
 Icon=utilities-system-monitor
 Terminal=false
-Categories=System;
-EOF
-chown -R "$KIOSK_USER:$KIOSK_USER" "$USER_HOME/.local/share/applications"
+Categories=System;"
+
+APPS="$USER_HOME/.local/share/applications"
+install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$APPS"
+printf '%s\n' "$DESKTOP_ENTRY" > "$APPS/netsnapshot-kiosk.desktop"
+chown -R "$KIOSK_USER:$KIOSK_USER" "$APPS"
+
+# The desktop dir is localised on some installs; XDG_DESKTOP_DIR is the truth.
+DESKTOP_DIR="$(sudo -u "$KIOSK_USER" xdg-user-dir DESKTOP 2>/dev/null || true)"
+[[ -z "$DESKTOP_DIR" || "$DESKTOP_DIR" == "$USER_HOME" ]] && DESKTOP_DIR="$USER_HOME/Desktop"
+install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$DESKTOP_DIR"
+printf '%s\n' "$DESKTOP_ENTRY" > "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
+# The file manager only launches a desktop .desktop file that is executable;
+# without this it opens it in a text editor instead.
+chmod +x "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
+chown "$KIOSK_USER:$KIOSK_USER" "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
+# pcmanfm keeps its own trust flag; set it where the attr is supported.
+sudo -u "$KIOSK_USER" gio set "$DESKTOP_DIR/netsnapshot-kiosk.desktop" \
+  metadata::trusted true >/dev/null 2>&1 || true
 
 # Remove the user service from earlier installs — it never worked under linger
 # and would fight the autostart launch.
