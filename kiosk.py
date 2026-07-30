@@ -189,6 +189,7 @@ class ScanJob:
         self.error: str | None = None
         self.snapshot_path: str | None = None
         self.report_ready = False
+        self.mode = "active"
 
     def snapshot(self) -> dict:
         with self.lock:
@@ -197,6 +198,7 @@ class ScanJob:
                 elapsed = round((self.finished or time.time()) - self.started, 1)
             return {
                 "state": self.state,
+                "mode": self.mode,
                 "elapsed": elapsed,
                 "line": self.line,
                 "log": self.log[-40:],
@@ -210,6 +212,7 @@ class ScanJob:
             if self.state == "running":
                 return False, "a scan is already running"
             self.state = "running"
+            self.mode = "passive" if params.get("mode") == "passive" else "active"
             self.started = time.time()
             self.finished = None
             self.line = "starting…"
@@ -714,9 +717,10 @@ async function pollScan(){
   try{ j = await (await fetch("/api/scan")).json(); }catch(e){ return; }
   if (j.state === "running"){
     if (lastState !== "running") show("run");
+    $("run-mode").textContent = j.mode || "active";
     $("run-elapsed").textContent = mmss(j.elapsed);
     $("run-step").textContent = j.line || "working…";
-    $("run-tail").innerHTML = (j.log||[]).slice(-8).reverse()
+    $("run-tail").innerHTML = (j.log||[]).slice(-6).reverse()
       .map(l => "<div>"+l.replace(/[<&]/g, c => c === "<" ? "&lt;" : "&amp;")+"</div>").join("");
   } else if (j.state === "done" && lastState !== "done"){
     renderResult(j);
@@ -765,7 +769,6 @@ toggle($("opt-mon"), "monitor");
 
 async function startScan(){
   if (busy) return; busy = true;
-  $("run-mode").textContent = opts.passive ? "passive" : "active";
   $("run-step").textContent = "starting…";
   $("run-tail").innerHTML = "";
   show("run");
