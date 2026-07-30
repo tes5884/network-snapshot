@@ -49,49 +49,32 @@ systemctl enable netsnapshot-kiosk.service
 # otherwise keep serving the old code.
 systemctl restart netsnapshot-kiosk.service
 
-echo "==> installing browser user service"
-# A user service rather than a bare autostart line: it restarts the browser if
-# it crashes, and `systemctl --user restart kiosk-browser` reloads the UI
-# without touching the session.
-install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$USER_HOME/.config/systemd/user"
-cat > "$USER_HOME/.config/systemd/user/kiosk-browser.service" <<EOF
-[Unit]
-Description=Network Snapshot kiosk browser
-
-[Service]
-Type=simple
-Environment=KIOSK_PORT=$PORT
-Environment=WAYLAND_DISPLAY=wayland-0
-# All the waiting and profile handling lives in the launcher so this unit is a
-# single exec.
-ExecStart=$HERE/kiosk-browser.sh
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-chown -R "$KIOSK_USER:$KIOSK_USER" "$USER_HOME/.config/systemd"
-
-# The user manager needs to be running to enable this; loginctl enable-linger
-# makes it come up at boot even before the graphical session settles.
-loginctl enable-linger "$KIOSK_USER" || true
-KUID="$(id -u "$KIOSK_USER")"
-# Talk to the *running* user manager — a plain `sudo -u` shell has no bus and
-# the enable silently lands in the wrong place.
-run_user() {
-  sudo -u "$KIOSK_USER" \
-    XDG_RUNTIME_DIR="/run/user/$KUID" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$KUID/bus" "$@"
-}
-run_user systemctl --user daemon-reload || true
-run_user systemctl --user reenable kiosk-browser.service || true
-
-# Older installs put the launch in labwc's autostart — remove it so the browser
-# doesn't open twice.
+echo "==> installing labwc autostart launch"
+# The browser launches from the compositor's own autostart rather than a systemd
+# user service. Under linger the user manager starts long before the session,
+# and Chromium launched from there never mapped a window; autostart runs inside
+# the graphical session with its environment already correct.
+install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$USER_HOME/.config/labwc"
 AUTOSTART="$USER_HOME/.config/labwc/autostart"
-if [[ -f "$AUTOSTART" ]] && grep -qF "# --- netsnapshot kiosk ---" "$AUTOSTART"; then
-  sed -i '/# --- netsnapshot kiosk ---/,/# --- end netsnapshot kiosk ---/d' "$AUTOSTART"
+MARK="# --- netsnapshot kiosk ---"
+touch "$AUTOSTART"
+# Drop any previous block so re-runs don't stack duplicate launches.
+sed -i '/# --- netsnapshot kiosk ---/,/# --- end netsnapshot kiosk ---/d' "$AUTOSTART"
+cat >> "$AUTOSTART" <<EOF
+$MARK
+KIOSK_PORT=$PORT $HERE/kiosk-browser.sh >/tmp/kiosk-browser.log 2>&1 &
+# --- end netsnapshot kiosk ---
+EOF
+chown "$KIOSK_USER:$KIOSK_USER" "$AUTOSTART"
+
+# Remove the user service from earlier installs — it never worked under linger
+# and would fight the autostart launch.
+if [[ -f "$USER_HOME/.config/systemd/user/kiosk-browser.service" ]]; then
+  KUID="$(id -u "$KIOSK_USER")"
+  sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/$KUID" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$KUID/bus" \
+    systemctl --user disable --now kiosk-browser.service >/dev/null 2>&1 || true
+  rm -f "$USER_HOME/.config/systemd/user/kiosk-browser.service"
 fi
 
 echo
@@ -99,4 +82,4 @@ echo "==> done"
 systemctl --no-pager --lines=3 status netsnapshot-kiosk.service || true
 echo
 echo "UI:      http://127.0.0.1:$PORT/"
-echo "Browser: systemctl --user start kiosk-browser   (or just reboot)"
+echo "Browser: reboot (autostart), log at /tmp/kiosk-browser.log"

@@ -48,11 +48,17 @@ sleep 5
 rm -rf "$PROFILE"
 
 log "starting $BROWSER on $WAYLAND_DISPLAY"
-exec "$BROWSER" \
-  --ozone-platform=wayland \
-  --kiosk --app="http://127.0.0.1:$PORT/" \
-  --noerrdialogs --disable-infobars --disable-session-crashed-bubble \
-  --overscroll-history-navigation=0 \
-  --check-for-update-interval=31536000 \
-  --password-store=basic \
-  --user-data-dir="$PROFILE"
+# Relaunch if it exits, so a crash doesn't leave a dead screen in the field.
+while true; do
+  "$BROWSER" \
+    --ozone-platform=wayland \
+    --kiosk --app="http://127.0.0.1:$PORT/" \
+    --noerrdialogs --disable-infobars --disable-session-crashed-bubble \
+    --overscroll-history-navigation=0 \
+    --check-for-update-interval=31536000 \
+    --password-store=basic \
+    --user-data-dir="$PROFILE"
+  log "browser exited ($?) — restarting"
+  rm -rf "$PROFILE"
+  sleep 3
+done
