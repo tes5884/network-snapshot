@@ -100,6 +100,24 @@ chown "$KIOSK_USER:$KIOSK_USER" "$DESKTOP_DIR/netsnapshot-kiosk.desktop"
 sudo -u "$KIOSK_USER" gio set "$DESKTOP_DIR/netsnapshot-kiosk.desktop" \
   metadata::trusted true >/dev/null 2>&1 || true
 
+# libfm counts application/x-desktop as an executable *type* whatever the file
+# mode, so opening the shortcut asks "Execute / Execute in Terminal / Cancel"
+# every time. quick_exec is the switch that turns that prompt off — there is no
+# per-file way to do it. It applies to executables generally for this user,
+# which is the right trade on a single-purpose field unit.
+LIBFM_DIR="$USER_HOME/.config/libfm"
+install -d -o "$KIOSK_USER" -g "$KIOSK_USER" "$LIBFM_DIR"
+LIBFM="$LIBFM_DIR/libfm.conf"
+[[ -f "$LIBFM" ]] || cp /etc/xdg/libfm/libfm.conf "$LIBFM" 2>/dev/null || printf '[config]\n' > "$LIBFM"
+if grep -q '^quick_exec=' "$LIBFM"; then
+  sed -i 's/^quick_exec=.*/quick_exec=1/' "$LIBFM"
+elif grep -q '^\[config\]' "$LIBFM"; then
+  sed -i '0,/^\[config\]/s//[config]\nquick_exec=1/' "$LIBFM"
+else
+  printf '[config]\nquick_exec=1\n' >> "$LIBFM"
+fi
+chown "$KIOSK_USER:$KIOSK_USER" "$LIBFM"
+
 # Remove the user service from earlier installs — it never worked under linger
 # and would fight the autostart launch.
 if [[ -f "$USER_HOME/.config/systemd/user/kiosk-browser.service" ]]; then
