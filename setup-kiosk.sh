@@ -72,6 +72,7 @@ ExecStart=$BROWSER \\
   --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
   --disable-features=TranslateUI --overscroll-history-navigation=0 \\
   --check-for-update-interval=31536000 \\
+  --password-store=basic \\
   --user-data-dir=$USER_HOME/.config/netsnapshot-kiosk-chrome
 Restart=always
 RestartSec=3
