@@ -60,26 +60,13 @@ Description=Network Snapshot kiosk browser
 
 [Service]
 Type=simple
+Environment=KIOSK_PORT=$PORT
 Environment=WAYLAND_DISPLAY=wayland-0
-# graphical-session.target is not reached under labwc+lightdm, so this hangs off
-# default.target. Linger starts the user manager well before the compositor and
-# the kiosk server, so wait for both — and exit NON-ZERO on timeout, so
-# Restart=always retries instead of launching the browser into a blank page.
-# Start from a clean profile every time. A wedged profile (from a crash, a kill,
-# or the keyring prompt) renders a permanently blank window with nothing to
-# recover it — and there is no state here worth keeping.
-ExecStartPre=/bin/rm -rf $USER_HOME/.config/netsnapshot-kiosk-chrome
-ExecStartPre=/bin/sh -c 'for i in \$(seq 1 120); do if [ -S "\$XDG_RUNTIME_DIR/wayland-0" ] && curl -sf -o /dev/null http://127.0.0.1:$PORT/; then if [ -x /usr/bin/wf-panel-pi ] && ! pgrep -x wf-panel-pi >/dev/null; then sleep 1; continue; fi; sleep 6; exit 0; fi; sleep 1; done; echo "compositor or kiosk server not ready" >&2; exit 1'
-ExecStart=$BROWSER \\
-  --ozone-platform=wayland \\
-  --kiosk --app=http://127.0.0.1:$PORT/ \\
-  --noerrdialogs --disable-infobars --disable-session-crashed-bubble \\
-  --disable-features=TranslateUI --overscroll-history-navigation=0 \\
-  --check-for-update-interval=31536000 \\
-  --password-store=basic \\
-  --user-data-dir=$USER_HOME/.config/netsnapshot-kiosk-chrome
+# All the waiting and profile handling lives in the launcher so this unit is a
+# single exec.
+ExecStart=$HERE/kiosk-browser.sh
 Restart=always
-RestartSec=3
+RestartSec=5
 
 [Install]
 WantedBy=default.target
